@@ -1,5 +1,6 @@
 // Project data model: room purposes, opening types, defaults and the sample apartment.
-import { normalizeOrientation, rectPoints, roundPoint } from './geometry.js';
+import { area, edge, normalizeOrientation, rectPoints, roundPoint } from './geometry.js';
+import { STYLES, TIERS } from './catalog.js';
 
 export const SCHEMA_VERSION = 1;
 
@@ -191,27 +192,159 @@ export function sampleProject() {
   return p;
 }
 
-// Bring older or partial project JSON up to the current shape.
-export function migrateProject(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  const p = { ...emptyProject(), ...raw };
-  p.finish = { global: {}, rooms: {}, ...(raw.finish || {}) };
-  p.rooms = (raw.rooms || [])
-    .filter((r) => Array.isArray(r.points) && r.points.length >= 3)
-    .map((r) => ({
-      id: r.id || newId('r'),
-      purpose: PURPOSES[r.purpose] ? r.purpose : 'other',
-      name: r.name || '',
-      points: normalizeOrientation(r.points.map((q) => ({ x: +q.x, y: +q.y }))),
-      height: r.height ?? null,
-      tileHeight: r.tileHeight ?? null,
-      kitchen: r.kitchen || null,
+// Limits used when reading saved or imported projects. Anything outside them is not a
+// real apartment and would only produce broken drawings or meaningless totals.
+export const LIMITS = {
+  maxCoord: 1000, // metres from the origin
+  minRoomArea: 0.01, // m²
+  minHeight: 1.5,
+  maxHeight: 10,
+  maxRooms: 500,
+  maxOpenings: 2000,
+  maxName: 200,
+};
+
+const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const num = (v) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
+const finite = (v) => Number.isFinite(num(v));
+const str = (v, max = LIMITS.maxName) => (typeof v === 'string' ? v.slice(0, max) : '');
+
+function cleanPoints(list) {
+  if (!Array.isArray(list)) return null;
+  const pts = [];
+  for (const q of list) {
+    if (!isObj(q) || !finite(q.x) || !finite(q.y)) return null;
+    const p = roundPoint({ x: num(q.x), y: num(q.y) });
+    if (Math.abs(p.x) > LIMITS.maxCoord || Math.abs(p.y) > LIMITS.maxCoord) return null;
+    const last = pts[pts.length - 1];
+    if (last && Math.abs(last.x - p.x) < 1e-6 && Math.abs(last.y - p.y) < 1e-6) continue;
+    pts.push(p);
+  }
+  while (pts.length > 1 && Math.abs(pts[0].x - pts[pts.length - 1].x) < 1e-6 && Math.abs(pts[0].y - pts[pts.length - 1].y) < 1e-6) pts.pop();
+  if (pts.length < 3 || area(pts) < LIMITS.minRoomArea) return null;
+  return normalizeOrientation(pts);
+}
+
+function cleanHeight(v) {
+  if (v === null || v === undefined || !finite(v)) return null;
+  const x = num(v);
+  return x >= LIMITS.minHeight && x <= LIMITS.maxHeight ? x : null;
+}
+
+function cleanKitchen(k, n) {
+  if (!isObj(k) || !Array.isArray(k.runs)) return null;
+  const runs = k.runs
+    .filter((r) => isObj(r) && Number.isInteger(num(r.edge)) && num(r.edge) >= 0 && num(r.edge) < n && finite(r.length) && num(r.length) > 0)
+    .map((r) => ({ edge: num(r.edge), start: finite(r.start) && num(r.start) > 0 ? num(r.start) : 0, length: num(r.length) }));
+  return { runs };
+}
+
+function cleanMap(m) {
+  const out = {};
+  if (!isObj(m)) return out;
+  for (const [k, v] of Object.entries(m)) if (typeof v === 'string') out[k] = v;
+  return out;
+}
+
+function cleanPlan(pl) {
+  if (!isObj(pl)) return null;
+  const ok = ['x', 'y', 'mPerPx', 'w', 'h'].every((k) => finite(pl[k]));
+  if (!ok || !(num(pl.mPerPx) > 0) || !(num(pl.w) > 0) || !(num(pl.h) > 0)) return null;
+  const opacity = finite(pl.opacity) ? Math.min(1, Math.max(0.1, num(pl.opacity))) : 0.6;
+  return {
+    x: num(pl.x), y: num(pl.y), mPerPx: num(pl.mPerPx), w: num(pl.w), h: num(pl.h),
+    opacity, visible: pl.visible !== false, calibrated: !!pl.calibrated,
+  };
+}
+
+// Bring older, partial or hand-edited project JSON up to the current shape. Every value is
+// checked, because saved data comes from the browser or from files people send each other:
+// a single bad number must not crash the drawing or turn the estimate into NaN. Items that
+// cannot be repaired are dropped and counted in `report` ({ rooms, openings }).
+// Returns null when the input is not a project at all.
+export function migrateProject(raw, report = {}) {
+  report.rooms = 0;
+  report.openings = 0;
+  // Every project this program writes has a rooms list; anything else is some other file.
+  if (!isObj(raw) || !Array.isArray(raw.rooms)) return null;
+  const base = emptyProject();
+  const p = {
+    ...base,
+    name: str(raw.name).trim() || base.name,
+    sample: raw.sample === true,
+    height: cleanHeight(raw.height) ?? DEFAULT_HEIGHT,
+    style: typeof raw.style === 'string' && STYLES[raw.style] ? raw.style : base.style,
+    tier: typeof raw.tier === 'string' && TIERS[raw.tier] ? raw.tier : base.tier,
+    plan: cleanPlan(raw.plan),
+  };
+
+  const ids = new Set();
+  for (const r of raw.rooms) {
+    const points = isObj(r) ? cleanPoints(r.points) : null;
+    if (!points || p.rooms.length >= LIMITS.maxRooms) {
+      report.rooms += 1;
+      continue;
+    }
+    let id = typeof r.id === 'string' && r.id ? r.id : newId('r');
+    if (ids.has(id)) id = newId('r');
+    ids.add(id);
+    const height = cleanHeight(r.height);
+    const tileHeight = finite(r.tileHeight) && num(r.tileHeight) > 0 ? num(r.tileHeight) : null;
+    p.rooms.push({
+      id,
+      purpose: typeof r.purpose === 'string' && PURPOSES[r.purpose] ? r.purpose : 'other',
+      name: str(r.name),
+      points,
+      height,
+      tileHeight,
+      kitchen: cleanKitchen(r.kitchen, points.length),
       unassigned: !!r.unassigned,
-    }));
-  const ids = new Set(p.rooms.map((r) => r.id));
-  p.openings = (raw.openings || [])
-    .filter((o) => ids.has(o.roomId) && OPENING_TYPES[o.type])
-    .map((o) => ({ ...o }));
+    });
+    // A duplicated room id gets a new id; its openings cannot be told apart from the
+    // first room's, so they stay with the first room.
+  }
+
+  const byId = new Map(p.rooms.map((r) => [r.id, r]));
+  const opIds = new Set();
+  const rawOps = Array.isArray(raw.openings) ? raw.openings : [];
+  for (const o of rawOps) {
+    const room = isObj(o) && typeof o.roomId === 'string' ? byId.get(o.roomId) : null;
+    const t = room && typeof o.type === 'string' ? OPENING_TYPES[o.type] : null;
+    const ei = t ? num(o.edge) : NaN;
+    if (!t || !Number.isInteger(ei) || ei < 0 || ei >= room.points.length || p.openings.length >= LIMITS.maxOpenings) {
+      report.openings += 1;
+      continue;
+    }
+    const len = edge(room.points, ei).len;
+    const width = Math.min(len, finite(o.width) && num(o.width) >= 0.2 ? num(o.width) : t.width);
+    const offset = finite(o.offset) ? Math.min(len, Math.max(0, num(o.offset))) : len / 2;
+    let id = typeof o.id === 'string' && o.id ? o.id : newId('o');
+    if (opIds.has(id)) id = newId('o');
+    opIds.add(id);
+    p.openings.push({
+      id,
+      roomId: room.id,
+      edge: ei,
+      offset,
+      type: o.type,
+      width,
+      height: finite(o.height) && num(o.height) > 0.3 && num(o.height) <= LIMITS.maxHeight ? num(o.height) : t.height,
+      sill: finite(o.sill) && num(o.sill) >= 0 && num(o.sill) <= LIMITS.maxHeight ? num(o.sill) : t.sill,
+    });
+  }
+
+  const finish = isObj(raw.finish) ? raw.finish : {};
+  const rooms = {};
+  if (isObj(finish.rooms)) {
+    for (const [rid, m] of Object.entries(finish.rooms)) if (byId.has(rid)) rooms[rid] = cleanMap(m);
+  }
+  p.finish = { global: cleanMap(finish.global), rooms };
   p.version = SCHEMA_VERSION;
   return p;
+}
+
+// Only embedded raster images are accepted as a saved plan image; anything else (a remote
+// URL, an SVG that could run script, a non-string) is ignored.
+export function cleanPlanImage(v) {
+  return typeof v === 'string' && /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(v) ? v : null;
 }

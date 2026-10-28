@@ -804,6 +804,12 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
       const [a, b] = [...pointers.values()];
       pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), m: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
       if (mode && mode.startsWith('drag')) cancelPreview();
+      // The first finger of a pinch must not leave a half-started rectangle behind,
+      // otherwise the next tap would create a room by accident.
+      if (mode === 'rect-drag') {
+        rectStart = null;
+        renderHint();
+      }
       mode = 'pinch';
       return;
     }
@@ -883,6 +889,13 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
       return;
     }
     const p = state.project;
+    // The dragged room or opening can disappear mid-drag (undo shortcut, another tab).
+    if (mode && mode.startsWith('drag') && (!p.rooms.some((x) => x.id === drag.room?.id)
+      || (mode === 'drag-opening' && !p.openings.some((o) => o.id === drag.op?.id)))) {
+      mode = null;
+      cancelPreview();
+      return;
+    }
     if (mode === 'drag-vertex' && drag.moved) {
       const r = p.rooms.find((x) => x.id === drag.room.id);
       const sp = snapPoint(w, { excludeRoomId: r.id, excludeIndex: drag.i });
@@ -1210,7 +1223,13 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
           const L = parseNum(lenIn.value);
           if (!(L > 0.05)) return;
           const last = polyPts[polyPts.length - 1];
-          let dir = cursor ? { x: cursor.x - last.x, y: cursor.y - last.y } : { x: 1, y: 0 };
+          let dir = cursor ? { x: cursor.x - last.x, y: cursor.y - last.y } : { x: 0, y: 0 };
+          if (Math.hypot(dir.x, dir.y) < 1e-6) {
+            // No pointer direction (touch screens, or the pointer is on the last corner):
+            // turn 90° clockwise from the previous wall, or go right for the first wall.
+            const prev = polyPts[polyPts.length - 2];
+            dir = prev ? { x: -(last.y - prev.y), y: last.x - prev.x } : { x: 1, y: 0 };
+          }
           if (ortho) dir = Math.abs(dir.x) >= Math.abs(dir.y) ? { x: Math.sign(dir.x) || 1, y: 0 } : { x: 0, y: Math.sign(dir.y) || 1 };
           const n = Math.hypot(dir.x, dir.y) || 1;
           polyPts.push(G.roundPoint({ x: last.x + (dir.x / n) * L, y: last.y + (dir.y / n) * L }));

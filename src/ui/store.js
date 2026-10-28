@@ -1,8 +1,9 @@
 // App state, undo history and local saving.
-import { sampleProject, migrateProject } from '../core/model.js';
+import { sampleProject, migrateProject, cleanPlanImage } from '../core/model.js';
 
 const KEY = 'bina-designer:project:v1';
 const IMG_KEY = 'bina-designer:plan-image:v1';
+const BACKUP_KEY = 'bina-designer:project:unreadable-backup';
 
 export const state = {
   project: null,
@@ -119,12 +120,23 @@ function scheduleSave() {
 }
 
 export function saveNow() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  if (!state.project) return;
+  const before = state.saveError;
   try {
     localStorage.setItem(KEY, JSON.stringify(state.project));
     state.saveError = null;
   } catch (e) {
-    state.saveError = 'ბრაუზერმა პროექტი ვერ შეინახა. გამოიყენე „ექსპორტი“, რომ ნამუშევარი არ დაიკარგოს.';
+    state.saveError = 'ბრაუზერმა პროექტი ვერ შეინახა. „პროექტი“ მენიუდან შეინახე ის ფაილად, რომ ნამუშევარი არ დაიკარგოს.';
   }
+  if (state.saveError !== before) emit('save');
+}
+
+// Write any pending change right away (page hidden, closed or reloaded). On phones the
+// page is often frozen without a beforeunload event, so visibility changes count too.
+export function flushSave() {
+  if (saveTimer) saveNow();
 }
 
 export function saveImage() {
@@ -138,20 +150,48 @@ export function saveImage() {
   }
 }
 
+// Returns the saved project (or the sample when there is none). A saved project that cannot
+// be read is copied to BACKUP_KEY before anything overwrites it, so it can still be
+// recovered by hand; `notice` then tells the user what happened.
 export function loadSaved() {
   let project = null;
   let img = null;
+  let notice = null;
+  let raw = null;
   try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) project = migrateProject(JSON.parse(raw));
-    img = localStorage.getItem(IMG_KEY);
+    raw = localStorage.getItem(KEY);
+    img = cleanPlanImage(localStorage.getItem(IMG_KEY));
   } catch (e) {
-    project = null;
+    raw = null;
   }
-  return { project: project || sampleProject(), image: project ? img : null };
+  if (raw) {
+    const report = {};
+    try {
+      project = migrateProject(JSON.parse(raw), report);
+    } catch (e) {
+      project = null;
+    }
+    if (!project) {
+      try {
+        localStorage.setItem(BACKUP_KEY, raw);
+      } catch (e) { /* nothing more can be done */ }
+      notice = 'შენახული პროექტი დაზიანებულია და ვერ გაიხსნა. ნაჩვენებია ნიმუში; ძველი მონაცემები ბრაუზერში სარეზერვოდ შენახულია.';
+    } else if (report.rooms || report.openings) {
+      notice = droppedNotice(report);
+    }
+  }
+  return { project: project || sampleProject(), image: project ? img : null, notice };
 }
 
-export function setPlanImage(dataUrl) {
+export function droppedNotice(report) {
+  const parts = [];
+  if (report.rooms) parts.push(`${report.rooms} ოთახი`);
+  if (report.openings) parts.push(`${report.openings} კარი/ფანჯარა`);
+  return parts.length ? `არასწორი მონაცემის გამო გამოტოვებულია: ${parts.join(', ')}.` : null;
+}
+
+export function setPlanImage(input) {
+  const dataUrl = cleanPlanImage(input);
   return new Promise((resolve) => {
     if (!dataUrl) {
       state.planImage = null;

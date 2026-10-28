@@ -35,10 +35,25 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
   let focusRoom = null;
   let needsRefit = true;
 
+  function showViewError(msg, retry) {
+    viewMsg.hidden = false;
+    clear(viewMsg);
+    add(viewMsg, h('p', null, msg),
+      retry ? h('button', { type: 'button', class: 'btn btn-sm', onclick: () => { viewFailed = false; viewMsg.textContent = '3D ხედი იტვირთება…'; ensureView(); } }, 'თავიდან ცდა') : null);
+  }
+
   async function ensureView() {
     if (view || viewFailed) return;
+    let THREE;
     try {
-      const THREE = await loadThree();
+      THREE = await loadThree();
+      if (!THREE) throw new Error('three');
+    } catch (e) {
+      viewFailed = true;
+      showViewError('3D ხედის ბიბლიოთეკა ვერ ჩაიტვირთა. შეამოწმე ინტერნეტი და სცადე თავიდან. მასალების არჩევა და ხარჯთაღრიცხვა მის გარეშეც მუშაობს.', true);
+      return;
+    }
+    try {
       view = createView3D({
         THREE,
         container: viewBox,
@@ -58,9 +73,11 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
       view.update(current(), { refit: true });
       needsRefit = false;
     } catch (e) {
+      // WebGL is unavailable or was refused (old device, disabled graphics acceleration).
       viewFailed = true;
-      viewMsg.hidden = false;
-      viewMsg.textContent = '3D ხედი ვერ ჩაიტვირთა. შეამოწმე ინტერნეტი და გახსენი გვერდი თავიდან. მასალების არჩევა და ხარჯთაღრიცხვა მის გარეშეც მუშაობს.';
+      view = null;
+      clear(viewBox);
+      showViewError('ეს ბრაუზერი ან მოწყობილობა 3D გრაფიკას (WebGL) ვერ აჩვენებს. მასალების არჩევა და ხარჯთაღრიცხვა მის გარეშეც მუშაობს.', false);
     }
   }
 

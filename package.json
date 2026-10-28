@@ -2,24 +2,19 @@
   "name": "bina-designer",
   "version": "1.0.0",
   "description": "ბინის დიზაინერი",
-  "main": "index.js",
-  "directories": {
-    "test": "test"
-  },
   "scripts": {
-    "test": "node --test test/core.test.js test/estimate.test.js",
+    "test": "node --test test/core.test.js test/estimate.test.js test/robustness.test.js test/store.test.js",
     "build": "node build.mjs"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "dependencies": {
-    "@fontsource/ibm-plex-mono": "^5.0.13",
-    "@fontsource/noto-sans-georgian": "^5.0.19",
-    "@fontsource/noto-serif-georgian": "^5.0.19",
-    "esbuild": "^0.21.5",
-    "pdfjs-dist": "^3.11.174",
-    "three": "^0.128.0"
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "esbuild": "^0.21.5"
   },
-  "type": "module"
+  "engines": {
+    "node": ">=18"
+  }
 }

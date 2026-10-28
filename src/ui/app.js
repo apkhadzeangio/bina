@@ -1,7 +1,7 @@
 // App shell: steps, toolbar, upload, project menu.
 import {
   state, current, commit, subscribe, emit, setSelection, setTool, undo, redo, canUndo, canRedo,
-  loadSaved, setPlanImage, saveNow,
+  loadSaved, setPlanImage, saveNow, flushSave, droppedNotice,
 } from './store.js';
 import { emptyProject, sampleProject, migrateProject } from '../core/model.js';
 import { createPlanEditor } from './plan-editor.js';
@@ -70,6 +70,7 @@ export async function main(root) {
   const saved = loadSaved();
   state.project = saved.project;
   if (saved.image) await setPlanImage(saved.image);
+  // A plan outline whose image could not be restored is kept; the user can upload it again.
 
   // ---------------------------------------------------------------- header
   const nav = h('nav', { class: 'steps', 'aria-label': 'ნაბიჯები' }, STEPS.map(([k, label], i) => h('a', {
@@ -292,10 +293,12 @@ export async function main(root) {
     if (!f) return;
     try {
       const raw = JSON.parse(await f.text());
-      const p = migrateProject(raw);
+      const report = {};
+      const p = migrateProject(raw, report);
       if (!p) throw new Error('bad');
-      newProject(p, raw.planImage || null);
-      toast('პროექტი გაიხსნა.', 'ok');
+      newProject(p, raw.planImage);
+      const dropped = droppedNotice(report);
+      toast(dropped ? `პროექტი გაიხსნა. ${dropped}` : 'პროექტი გაიხსნა.', dropped ? 'warn' : 'ok');
     } catch (e) {
       toast('ფაილი ვერ წავიკითხე. საჭიროა ამ პროგრამიდან შენახული .json ფაილი.', 'warn');
     }
@@ -334,6 +337,7 @@ export async function main(root) {
       if (state.step === 'plan') materials.planChanged();
     }
     if (kind === 'tool' && state.tool !== 'select') hidePop();
+    if (kind === 'save' && state.saveError) toast(state.saveError, 'warn');
   });
 
   function showStep() {
@@ -359,6 +363,10 @@ export async function main(root) {
   }
   window.addEventListener('hashchange', showStep);
   window.addEventListener('beforeunload', saveNow);
+  window.addEventListener('pagehide', flushSave);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushSave();
+  });
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => emit('theme'));
   new MutationObserver(() => emit('theme')).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
@@ -366,5 +374,6 @@ export async function main(root) {
   syncToolbar();
   showStep();
   inspector.render();
-  if (state.saveError) toast(state.saveError, 'warn');
+  if (saved.notice) toast(saved.notice, 'warn');
+  else if (state.saveError) toast(state.saveError, 'warn');
 }

@@ -38,9 +38,12 @@ function numField({ id, label, value, unit = 'მ', placeholder, onCommit, digit
     placeholder: placeholder || '',
     autocomplete: 'off',
   });
+  const shown = inp.value;
+  // onCommit returns false when the value was rejected; the field then shows the value
+  // that is actually in use again instead of keeping text that was never applied.
   const commitVal = () => {
     const raw = inp.value.trim();
-    onCommit(raw === '' ? null : parseNum(raw), inp);
+    if (onCommit(raw === '' ? null : parseNum(raw), inp) === false) inp.value = shown;
   };
   inp.addEventListener('change', commitVal);
   inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
@@ -252,7 +255,14 @@ export function createInspector({ el, onUpload, onStartScale, onNext }) {
         ` განსხვავებული ჭერის სიმაღლე (ბინაში ${fmtNum(p.height ?? DEFAULT_HEIGHT, 2)} მ)`),
       ownHeight ? numField({
         id: 'room-h', label: 'ჭერის სიმაღლე ამ ოთახში', value: room.height,
-        onCommit: (v) => { if (v >= 2 && v <= 6) commit(updateRoom(current(), room.id, { height: v })); else toast('2–6 მ', 'warn'); },
+        onCommit: (v) => {
+          if (!(v >= 2 && v <= 6)) {
+            toast('ჭერის სიმაღლე 2–6 მეტრის ფარგლებში უნდა იყოს.', 'warn');
+            return false;
+          }
+          commit(updateRoom(current(), room.id, { height: v }));
+          return true;
+        },
       }) : null);
 
     let extra = null;
@@ -265,7 +275,11 @@ export function createInspector({ el, onUpload, onStartScale, onNext }) {
           onCommit: (v) => {
             if (v === null) commit(updateRoom(current(), room.id, { tileHeight: null }));
             else if (v > 0.3 && v <= roomHeight(room, p)) commit(updateRoom(current(), room.id, { tileHeight: v }));
-            else toast('ფილის სიმაღლე ჭერზე მაღალი ვერ იქნება.', 'warn');
+            else {
+              toast(`ფილის სიმაღლე 0.3 მ-დან ჭერის სიმაღლემდე (${fmtNum(roomHeight(room, p), 2)} მ) უნდა იყოს.`, 'warn');
+              return false;
+            }
+            return true;
           },
         }),
         h('div', { class: 'kv' }, h('span', null, 'ფილა კედლებზე'), h('b', { class: 'num' }, fmtArea(m.wallTileArea))),
@@ -342,6 +356,16 @@ export function createInspector({ el, onUpload, onStartScale, onNext }) {
     const other = link ? p.rooms.find((r) => r.id === link.to) : null;
     const kinds = Object.entries(OPENING_TYPES).filter(([, v]) => v.kind === t.kind);
     const set = (patch) => commit(updateOpening(current(), op.id, patch));
+    const wallH = roomHeight(room, p);
+    // Rejects values that cannot exist on this wall instead of silently ignoring them.
+    const check = (ok, msg, patch) => {
+      if (!ok) {
+        toast(msg, 'warn');
+        return false;
+      }
+      set(patch);
+      return true;
+    };
 
     add(el, 
       h('div', { class: 'insp-head' },
@@ -360,17 +384,26 @@ export function createInspector({ el, onUpload, onStartScale, onNext }) {
           onclick: () => set({ type: k, height: v.height, sill: v.sill, width: k === op.type ? op.width : v.width }),
         }, v.short))),
       h('div', { class: 'field-grid' },
-        numField({ id: 'op-w', label: 'სიგანე', value: op.width, onCommit: (v) => v > 0.2 && set({ width: v }) }),
-        numField({ id: 'op-h', label: 'სიმაღლე', value: op.height, onCommit: (v) => v > 0.3 && set({ height: v }) }),
+        numField({
+          id: 'op-w', label: 'სიგანე', value: op.width,
+          onCommit: (v) => check(v >= 0.2 && v <= e.len, `სიგანე 0.2 მ-დან კედლის სიგრძემდე (${fmtNum(e.len, 2)} მ) უნდა იყოს.`, { width: v }),
+        }),
+        numField({
+          id: 'op-h', label: 'სიმაღლე', value: op.height,
+          onCommit: (v) => check(v > 0.3 && op.sill + v <= wallH + 1e-9, `სიმაღლე რაფასთან ერთად ჭერს (${fmtNum(wallH, 2)} მ) არ უნდა აღემატებოდეს.`, { height: v }),
+        }),
         t.kind === 'window' && op.type === 'window'
-          ? numField({ id: 'op-sill', label: 'რაფის სიმაღლე', value: op.sill, onCommit: (v) => v >= 0 && set({ sill: v }) })
+          ? numField({
+            id: 'op-sill', label: 'რაფის სიმაღლე', value: op.sill,
+            onCommit: (v) => check(v >= 0 && v + op.height <= wallH + 1e-9, `რაფა ფანჯარასთან ერთად ჭერს (${fmtNum(wallH, 2)} მ) არ უნდა აღემატებოდეს.`, { sill: v }),
+          })
           : null,
         numField({
           id: 'op-off',
           label: 'კუთხიდან',
           value: Math.max(0, op.offset - op.width / 2),
           hint: `კედელი ${op.edge + 1}, ${fmtNum(e.len, 2)} მ`,
-          onCommit: (v) => v >= 0 && set({ offset: v + op.width / 2 }),
+          onCommit: (v) => check(v >= 0 && v + op.width <= e.len + 1e-9, `ღიობი კედელს (${fmtNum(e.len, 2)} მ) არ უნდა სცდებოდეს.`, { offset: v + op.width / 2 }),
         })),
       op.type === 'door' ? h('p', { class: 'muted small' }, 'ოთახის კარი შედის ხარჯთაღრიცხვაში. ღიობი და შესასვლელი კარი არ შედის.') : null,
       op.type === 'window' ? h('p', { class: 'muted small' }, 'ფანჯრისთვის რაფა ავტომატურად ითვლება.') : null,
