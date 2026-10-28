@@ -1595,8 +1595,9 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated, onOpenLi
       closePoly();
       return;
     }
-    if (mod && e.key.toLowerCase() === 'd' && onPlan && state.selection?.type === 'furniture') {
-      e.preventDefault(); // not the browser's bookmark shortcut
+    if (mod && e.key.toLowerCase() === 'd' && state.selection?.type === 'furniture') {
+      // also right after a button in the panel was used; not the browser's bookmark shortcut
+      e.preventDefault();
       duplicateSelection();
       return;
     }
