@@ -1,6 +1,7 @@
 // Project data model: room purposes, opening types, defaults and the sample apartment.
 import { area, edge, normalizeOrientation, rectPoints, roundPoint } from './geometry.js';
 import { STYLES, TIERS } from './catalog.js';
+import { ALIASES } from './products.js';
 import { newId } from './ids.js';
 import { makeFurniture, runFurniture, cleanFurniture } from './furniture.js';
 
@@ -19,12 +20,12 @@ export const PURPOSES = {
   },
   kitchenLiving: {
     label: 'სამზარეულო-მისაღები', group: 'kitchen', icon: 'kitchen',
-    surfaces: { floor: 'floor_wood', walls: 'paint', ceiling: 'ceiling', skirting: 'skirting', backsplash: 'tile_wall', countertop: 'stone' },
+    surfaces: { floor: 'floor_wood', walls: 'paint', ceiling: 'ceiling', skirting: 'skirting', backsplash: 'tile_wall', countertop: 'stone', cabinet: 'cabinet_front' },
     kitchen: true, defaultRun: 3.6,
   },
   kitchen: {
     label: 'სამზარეულო', group: 'kitchen', icon: 'kitchen',
-    surfaces: { floor: 'tile_floor', walls: 'paint', ceiling: 'ceiling', skirting: 'skirting', backsplash: 'tile_wall', countertop: 'stone' },
+    surfaces: { floor: 'tile_floor', walls: 'paint', ceiling: 'ceiling', skirting: 'skirting', backsplash: 'tile_wall', countertop: 'stone', cabinet: 'cabinet_front' },
     kitchen: true, defaultRun: 4.2,
   },
   bedroom: {
@@ -275,10 +276,29 @@ function cleanKitchen(k, n) {
   return { runs };
 }
 
+// Material choices: { surfaceKey: materialId }. An id that a later catalog renamed is
+// carried over through ALIASES; an id that is unknown is kept as it is (the surface then
+// falls back to the style's default and the choice is not lost if the product returns).
 function cleanMap(m) {
   const out = {};
   if (!isObj(m)) return out;
-  for (const [k, v] of Object.entries(m)) if (typeof v === 'string') out[k] = v;
+  for (const [k, v] of Object.entries(m)) if (typeof v === 'string' && v.length <= 80) out[k] = ALIASES[v] || v;
+  return out;
+}
+
+// Render reference settings per surface: { '<roomId|*>|<surface>': { mandatory, orientation } }.
+function cleanRefs(m, roomIds) {
+  const out = {};
+  if (!isObj(m)) return out;
+  for (const [k, v] of Object.entries(m)) {
+    const [rid, surface, extra] = k.split('|');
+    if (extra !== undefined || !surface || !isObj(v)) continue;
+    if (rid !== '*' && !roomIds.has(rid)) continue;
+    const r = {};
+    if (typeof v.mandatory === 'boolean') r.mandatory = v.mandatory;
+    if (['auto', 'along', 'across'].includes(v.orientation)) r.orientation = v.orientation;
+    if (Object.keys(r).length) out[k] = r;
+  }
   return out;
 }
 
@@ -393,6 +413,8 @@ export function migrateProject(raw, report = {}) {
     for (const [rid, m] of Object.entries(finish.rooms)) if (byId.has(rid)) rooms[rid] = cleanMap(m);
   }
   p.finish = { global: cleanMap(finish.global), rooms };
+  const refs = cleanRefs(finish.refs, byId);
+  if (Object.keys(refs).length) p.finish.refs = refs;
   p.version = SCHEMA_VERSION;
   return p;
 }

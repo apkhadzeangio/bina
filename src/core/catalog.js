@@ -9,7 +9,7 @@
 //           'pack'   → consumable priced per pack; quantity comes from the rules in quantities.js
 
 export const PRICES_CHECKED = '2026-10-28';
-export const CATALOG_NOTE = 'ფასები აღებულია მაღაზიების საიტებიდან 28.10.2026-ს და დროთა განმავლობაში იცვლება. ყიდვამდე გადაამოწმე. ფერის ნიმუში მიახლოებითია.';
+export const CATALOG_NOTE = 'ფასები აღებულია მაღაზიების საიტებიდან 28.10.2026-ს და დროთა განმავლობაში იცვლება. ყიდვამდე გადაამოწმე. ფერის ნიმუშები ხელოვნურად შექმნილი მიახლოებაა და არა პროდუქტის ფოტო.';
 
 export const SHOPS = {
   citadeli: { label: 'ციტადელი', url: 'https://citadeli.com' },
@@ -55,6 +55,7 @@ export const CATEGORIES = {
   skirting: 'პლინტუსი',
   sanitary_bath: 'სანტექნიკა — აბაზანა',
   sanitary_wc: 'სანტექნიკა — საპირფარეშო',
+  cabinet_front: 'კარადის ფასადი',
   consumable: 'დამხმარე მასალა',
 };
 
@@ -81,11 +82,11 @@ const box = (size) => ({ size, unit: 'm2', label: 'შეკვრა' });
 // ------------------------------------------------------------------ laminate, vinyl, parquet
 const CIT_LAM = 'https://citadeli.com/products/29-laminati-da-aqsesuarebi/81-laminati/';
 add({ id: 'lam_kt205', cat: 'floor_wood', name: 'ლამინატი Kastamonu KT205 Devine Meşe', spec: '8 მმ, 31 კლასი, 1205×197, შეკვრა 2.374 მ²', tier: 'econ', styles: ['warm', 'classic', 'scandi'], measure: 'area', price: 22.5, pack: box(2.374), waste: 0.07, underlay: true, look: plank('#c6a27a', '#9f7a52', 0.197, 1.205), source: src('citadeli', `${CIT_LAM}20921-laminirebuli-iataki-kt205-08x197x1205-ac3-devine-mese-otn-31-class-2374-m2`) });
-add({ id: 'lam_kt502', cat: 'floor_wood', name: 'ლამინატი Kastamonu KT502 Lissac Ash', spec: '8 მმ, 31 კლასი, 1205×197, შეკვრა 2.374 მ²', tier: 'econ', styles: ['scandi', 'modern'], measure: 'area', price: 24.5, pack: box(2.374), waste: 0.07, underlay: true, look: plank('#d6c9b4', '#b3a48d', 0.197, 1.205), source: src('citadeli', `${CIT_LAM}20912-laminirebuli-iataki-kt502-08x197x1205-lissac-ash-otn-31-class-2374-m2`) });
-add({ id: 'lam_kt503', cat: 'floor_wood', name: 'ლამინატი Kastamonu KT503 Boz Yazı', spec: '8 მმ, 31 კლასი, 1205×197, შეკვრა 2.374 მ²', tier: 'econ', styles: ['loft', 'modern'], measure: 'area', price: 24.5, pack: box(2.374), waste: 0.07, underlay: true, look: plank('#a59e95', '#857d73', 0.197, 1.205), source: src('citadeli', `${CIT_LAM}20913-laminirebuli-iataki-kt503-08x197x1205-boz-yazi-otn-31-class-2374-m2`) });
-add({ id: 'lam_kt405', cat: 'floor_wood', name: 'ლამინატი Kastamonu KT405 Canyon Meşe', spec: '8 მმ, 32 კლასი, 1205×197, შეკვრა 1.899 მ²', tier: 'mid', styles: ['warm', 'classic'], measure: 'area', price: 25.5, pack: box(1.899), waste: 0.07, underlay: true, look: plank('#b98a5a', '#8d6339', 0.197, 1.205), source: src('citadeli', `${CIT_LAM}20917-laminirebuli-iataki-kt405-08x197x1205-canyon-mese-otn-32-class-1899-m2`) });
-add({ id: 'lam_se002', cat: 'floor_wood', name: 'ლამინატი Kastamonu Step XL SE002 Canyon Oak', spec: '12 მმ, 33 კლასი, 1202×195, შეკვრა 1.87 მ²', tier: 'mid', styles: ['scandi', 'warm'], measure: 'area', price: 38.5, pack: box(1.87), waste: 0.07, underlay: true, look: plank('#c39b6e', '#9b7448', 0.195, 1.202), source: src('citadeli', `${CIT_LAM}25790-lamonirebuli-iataki-stepxl-se002-12x195x1202-canyon-oak-otn-33-class-187-m2`) });
-add({ id: 'lam_se010', cat: 'floor_wood', name: 'ლამინატი Kastamonu Step XL SE010 Tokyo', spec: '12 მმ, 33 კლასი, 1202×195, შეკვრა 1.87 მ²', tier: 'mid', styles: ['loft', 'modern'], measure: 'area', price: 38.5, pack: box(1.87), waste: 0.07, underlay: true, look: plank('#8a7f74', '#6a5f55', 0.195, 1.202), source: src('citadeli', `${CIT_LAM}25791-laminirebuli-iataki-stepxl-se010-12x195x1202-tokyo-otn-33-class-187-m2`) });
+add({ id: 'lam_kt502', cat: 'floor_wood', name: 'ლამინატი Kastamonu KT502 Lussac Ash', spec: '8 მმ, 31 კლასი, 1205×197, შეკვრა 2.374 მ²', tier: 'econ', styles: ['scandi', 'modern'], measure: 'area', price: 24.5, pack: box(2.374), waste: 0.07, underlay: true, look: plank('#d6c9b4', '#b3a48d', 0.197, 1.205), source: src('citadeli', 'https://citadeli.com/en/products/29-laminirovannaia-napolnaia-plitka-i-aksessuary/81-laminat/20912-laminat-kt-502-lussac-ash') });
+add({ id: 'lam_kt503', cat: 'floor_wood', name: 'ლამინატი Kastamonu KT503 Boz Yazı', spec: '8 მმ, 31 კლასი, 1205×197, შეკვრა 2.374 მ²', tier: 'econ', styles: ['loft', 'modern'], measure: 'area', price: 24.5, pack: box(2.374), waste: 0.07, underlay: true, look: plank('#a59e95', '#857d73', 0.197, 1.205), source: src('citadeli', 'https://citadeli.com/products/29-laminirovannaia-napolnaia-plitka-i-aksessuary/81-laminat/20913-laminat-kt-503-boz-yazi') });
+add({ id: 'lam_kt405', cat: 'floor_wood', name: 'ლამინატი Kastamonu KT405 Canyon Meşe', spec: '8 მმ, 32 კლასი, 1205×197, შეკვრა 1.899 მ²', tier: 'mid', styles: ['warm', 'classic'], measure: 'area', price: 25.5, pack: box(1.899), waste: 0.07, underlay: true, look: plank('#b98a5a', '#8d6339', 0.197, 1.205), source: src('citadeli', 'https://citadeli.com/products/29-laminate-flooring-and-accessories/81-laminate/20917-laminate-flooring-kt-405-canyon-oak') });
+add({ id: 'lam_se002', cat: 'floor_wood', name: 'ლამინატი Kastamonu Step XL SE002 Canyon Oak', spec: '12 მმ, 33 კლასი, 1202×195, შეკვრა 1.87 მ²', tier: 'mid', styles: ['scandi', 'warm'], measure: 'area', price: 38.5, pack: box(1.87), waste: 0.07, underlay: true, look: plank('#c39b6e', '#9b7448', 0.195, 1.202), source: src('citadeli', 'https://citadeli.com/en/products/29-laminirovannaia-napolnaia-plitka-i-aksessuary/81-laminat/25790-stepxl-se002-12x195x1202-ac5-canyon-oak-otn-33-class-187-m2-8-plitok-v-upakovke') });
+add({ id: 'lam_se010', cat: 'floor_wood', name: 'ლამინატი Kastamonu Step XL SE010 Tokyo', spec: '12 მმ, 33 კლასი, 1202×195, შეკვრა 1.87 მ²', tier: 'mid', styles: ['loft', 'modern'], measure: 'area', price: 38.5, pack: box(1.87), waste: 0.07, underlay: true, look: plank('#8a7f74', '#6a5f55', 0.195, 1.202), source: src('citadeli', 'https://citadeli.com/en/products/29-laminate-flooring-and-accessories/81-laminate/25791-stepxl-se010-12x195x1202-ac5-tokyo-otn-33-class-187-m2-8-tiles-in-a-pack') });
 add({ id: 'lam_herring_l8602', cat: 'floor_wood', name: 'ლამინატი, ნაძვისებრი EIR L8602', spec: '10 მმ, 33 კლასი AC5, 606×101, ფასკით', tier: 'mid', styles: ['classic', 'warm'], measure: 'area', price: 35.9, waste: 0.12, underlay: true, look: herring('#c09468', '#97704a', 0.101, 0.606), source: src('nova', 'https://nova.ge/ka/laminati/laminirebuli-iataki-class33-ac5-hdf-eir-l8602-cvilit-shovit-606x101x10mm', 'შეკვრის ზომა საიტზე არ არის მითითებული') });
 add({ id: 'spc_41302', cat: 'floor_wood', name: 'SPC ვინილის იატაკი 413-02', spec: '5 მმ, ზედა ფენა 0.55 მმ, 1219×181, წყალგამძლე', tier: 'mid', styles: ['scandi', 'modern'], measure: 'area', price: 55.7, waste: 0.06, look: plank('#d4bf9c', '#b49c78', 0.181, 1.219), source: src('nova', 'https://nova.ge/ka/vinilis-iataki/vinilis-iataki-1811x12192-5mm-055mm-i4f-413-02-vinil-parquet-spc', 'შეკვრის ზომა საიტზე არ არის მითითებული') });
 add({ id: 'eng_f4e', cat: 'floor_wood', name: 'საინჟინრო პარკეტი F4E, მუხა', spec: '14 მმ, 1900×190, მუხის ფენა 3–4 მმ', tier: 'prem', styles: ['scandi', 'modern', 'loft'], measure: 'area', price: 179, waste: 0.08, underlay: true, look: plank('#dcc6a2', '#bea27c', 0.19, 1.9), source: src('parketi', 'https://parketi.ge/en/collections/3-layer-parquet-1', 'საწყისი ფასი („-დან“)') });
@@ -121,13 +122,15 @@ add({ id: 'wt_metro', cat: 'tile_wall', name: 'კაფელი Vitra Miniworx
 // ------------------------------------------------------------------ paint (priced per bucket)
 const bucket = (size) => ({ size, unit: 'l', label: 'ვედრო' });
 const PAINT_ECON = src('gorgia', 'https://gorgia.ge/ka/remonti/laq-sagebavebi/sagebavi/kedlis-da-cheris-sagebavi/interieris-wyalemulsia-plastik-15lt-tetri/');
-const PAINT_MID = src('citadeli', 'https://citadeli.com/products/77-laq-saghebavebi-da-aqsesuarebi/34-interieris-saghebavi/26960-emulsiuri-saghebavi-shida-samushaoebistvis-step-latex-high-level-base-tr-10lt', 'შეფერვის ბაზა; შეფერვის ფასი არ შედის');
+const PAINT_MID = src('citadeli', 'https://citadeli.com/en/products/77-varnishes-and-accessories/26960-emulsion-paint-for-interior-work-step-latex-high-level-base-tr-10lt', 'შეფერვის ბაზა (BASE TR); შეფერვის ფასი არ შედის');
+const PAINT_MID_WHITE = src('citadeli', 'https://citadeli.com/en/products/77-varnishes-and-accessories/34-interior-paint/26957-saghebavi-tsyaldispshida-samush-step-latex-high-level-white-10lt');
 const PAINT_PREM = src('gorgia', 'https://gorgia.ge/ka/remonti/laq-sagebavebi/sagebavi/kedlis-da-cheris-sagebavi/%E1%83%A1%E1%83%90%E1%83%A6%E1%83%94%E1%83%91%E1%83%90%E1%83%95%E1%83%98-%E1%83%98%E1%83%9C%E1%83%A2%E1%83%94%E1%83%A0%E1%83%98%E1%83%94%E1%83%A0%E1%83%98%E1%83%A1-silicone-mat-marshall-15%E1%83%9A%E1%83%A2-%E1%83%97%E1%83%94%E1%83%97%E1%83%A0%E1%83%98/');
 const P = (id, name, spec, tier, styles, price, size, color, source) =>
   add({ id, cat: 'paint', name, spec, tier, styles, measure: 'paint', price, pack: bucket(size), coverage: 10, coats: 2, waste: 0.05, look: paint(color), source });
 P('paint_econ_white', 'წყალემულსია Plastik, თეთრი', 'ინტერიერის, 15 ლ', 'econ', ['modern', 'scandi', 'loft'], 132.4, 15, '#f4f4f1', PAINT_ECON);
 P('paint_econ_warm', 'წყალემულსია Plastik, თბილი თეთრი', 'ინტერიერის, 15 ლ, შეფერილი', 'econ', ['warm', 'classic'], 132.4, 15, '#f1ebe0', { ...PAINT_ECON, note: 'შეფერვის ფასი არ შედის' });
-P('paint_mid_white', 'Chromodomi Step-Latex, თეთრი', 'ლატექსი, რეცხვადი, 10 ლ', 'mid', ['modern', 'scandi', 'loft'], 180, 10, '#f5f5f2', PAINT_MID);
+// 28.10.2026: the white paint is a separate product (200 ₾); 180 ₾ is the tinting base.
+P('paint_mid_white', 'Chromodomi Step-Latex High Level, თეთრი', 'ლატექსი, რეცხვადი, 10 ლ', 'mid', ['modern', 'scandi', 'loft'], 200, 10, '#f5f5f2', PAINT_MID_WHITE);
 P('paint_mid_warm', 'Chromodomi Step-Latex, თბილი თეთრი', 'ლატექსი, რეცხვადი, 10 ლ, შეფერილი', 'mid', ['warm', 'classic'], 180, 10, '#efe8dc', PAINT_MID);
 P('paint_mid_greige', 'Chromodomi Step-Latex, გრეიჯი', 'ლატექსი, 10 ლ, შეფერილი', 'mid', [], 180, 10, '#d6cfc4', PAINT_MID);
 P('paint_mid_sage', 'Chromodomi Step-Latex, სალბისფერი', 'ლატექსი, 10 ლ, შეფერილი', 'mid', [], 180, 10, '#b7bfa8', PAINT_MID);
@@ -187,6 +190,19 @@ add({ id: 'out_r11', cat: 'outdoor', name: 'კერამოგრანიტ
 add({ id: 'out_michel', cat: 'outdoor', name: 'კერამოგრანიტი Michel Dark Gray 60×60, 15 მმ', spec: 'რუსტიკული, მატი, სქელი', tier: 'mid', styles: ALL, measure: 'area', price: 42.6, pack: perTile(0.6, 0.6), waste: 0.1, look: tile('stone', '#5f5e5c', '#4c4b49', 0.6, 0.6), source: src('nova', 'https://nova.ge/ka/keramo-graniti/keramograniti-60x60-michel-dark-gray-matt-rustic-15mm-grade-a') });
 add({ id: 'out_wpc', cat: 'outdoor', name: 'WPC დეკი Poolpro', spec: '2800×150×25, სამაგრები შედის', tier: 'prem', styles: ALL, measure: 'area', price: 134.9, waste: 0.1, look: plank('#8d6e52', '#6f5440', 0.15, 2.8), source: src('wpc', 'https://wpc.ge/deck/', 'ლაგები (საყრდენი) არ შედის') });
 
+// ------------------------------------------------------------------ kitchen cabinet fronts
+// Kitchens are made to order, so these are not shop products: they record the look the
+// client wants (colour, surface, wood or plain) for the joiner and for the interior render.
+// They have no price and are not part of the purchase list.
+const pref = (m) => add({ cat: 'cabinet_front', measure: 'none', price: null, tier: 'mid', preference: true, ...m });
+pref({ id: 'cf_white_matt', name: 'ფასადი: თეთრი მატი, სახელურის გარეშე', spec: 'შეღებილი ან ლამინირებული MDF, მატი, ჩასაჭერი პროფილით', styles: ['modern', 'scandi'], look: flat('#efeeea') });
+pref({ id: 'cf_light_oak', name: 'ფასადი: ღია მუხის ფაქტურა', spec: 'ხის ფაქტურის ლამინატი ან შპონი, ვერტიკალური ბოჭკო', styles: ['scandi', 'warm'], look: plank('#cfb28a', '#b39570', 0.6, 0.72) });
+pref({ id: 'cf_walnut', name: 'ფასადი: კაკლის ფაქტურა', spec: 'მუქი ხის ფაქტურა, ვერტიკალური ბოჭკო', styles: ['warm', 'loft'], look: plank('#7a5a42', '#5f4533', 0.6, 0.72) });
+pref({ id: 'cf_ivory_shaker', name: 'ფასადი: სპილოსძვლისფერი, ჩარჩოიანი', spec: 'შეღებილი MDF, კლასიკური ჩარჩო, მატი', styles: ['classic'], look: flat('#ebe4d6') });
+pref({ id: 'cf_greige_matt', name: 'ფასადი: გრეიჯი მატი', spec: 'შეღებილი MDF, მატი', styles: ['warm', 'modern'], look: flat('#cfc7bb') });
+pref({ id: 'cf_sage_matt', name: 'ფასადი: სალბისფერი მატი', spec: 'შეღებილი MDF, მატი', styles: [], look: flat('#a9b39a') });
+pref({ id: 'cf_graphite_matt', name: 'ფასადი: გრაფიტი მატი', spec: 'შეღებილი ან ლამინირებული MDF, მატი', styles: ['loft', 'modern'], look: flat('#3f4144') });
+
 // ------------------------------------------------------------------ consumables
 add({ id: 'cons_adhesive', cat: 'consumable', name: 'ფილის წებო weber.kol flex porselen', spec: '25 კგ, ყინვაგამძლე, საშუალო და დიდი ფილისთვის', tier: 'mid', measure: 'pack', baseUnit: 'kg', price: 32, pack: { size: 25, unit: 'kg', label: 'ტომარა' }, look: flat('#c9c6c0'), source: src('citadeli', 'https://citadeli.com/products/102-saremonto-masalebi/6-samsheneblo-fkhvnili/65-tsebo-tsementi/3018-tsebo-tsementi-weberkol-flex-porselen-gri-25-kg-yinvagamdzle-sashualo-da-didi-zomis-filebistvis') });
 add({ id: 'cons_grout', cat: 'consumable', name: 'ფუგა Weber Joint Sil', spec: '2 კგ', tier: 'mid', measure: 'pack', baseUnit: 'kg', price: 9.6, pack: { size: 2, unit: 'kg', label: 'შეკვრა' }, look: flat('#d0ccc4'), source: src('citadeli', 'https://citadeli.com/102-repair-materials/6-construction-powder/66-tile-grout') });
@@ -220,6 +236,7 @@ export function pick(cat, style, tier) {
 }
 
 export function priceLabel(m) {
+  if (m.price === null || m.price === undefined) return 'ფასი არ ითვლება';
   const n = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(m.price);
   switch (m.measure) {
     case 'area': return `${n} ₾/მ²`;

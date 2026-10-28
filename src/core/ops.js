@@ -88,7 +88,7 @@ export function deleteRoom(project, roomId) {
     rooms: project.rooms.filter((r) => r.id !== roomId),
     openings: project.openings.filter((o) => o.roomId !== roomId),
     furniture: (project.furniture || []).filter((f) => f.roomId !== roomId),
-    finish: { ...project.finish, rooms },
+    finish: { ...project.finish, rooms, ...(project.finish?.refs ? { refs: Object.fromEntries(Object.entries(project.finish.refs).filter(([k]) => !k.startsWith(`${roomId}|`))) } : {}) },
   };
 }
 
