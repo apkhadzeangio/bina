@@ -27,11 +27,16 @@ npm run build   # dist/artifact.html და dist/site/index.html
 
 ## გამოქვეყნება
 
-Cloudflare Pages-ის პროექტი `bina` (`bina-csn.pages.dev`, დომენი `bina.lithos.ge`) ფაილის ატვირთვით შეიქმნა. ასეთ პროექტს Cloudflare Git-ის ინტეგრაციაზე ვერ გადაიყვანს, ამიტომ გამოქვეყნებას GitHub Actions აკეთებს (`.github/workflows/deploy.yml`). `main`-ში ყოველი push-ის შემდეგ ის `dist/site`-ს ამ პროექტში ტვირთავს.
+ეს პროექტი დაკავშირებულია Cloudflare Pages-ის არსებულ **bina** პროექტთან GitHub-ის ნატიური ინტეგრაციით.
 
-რეპოზიტორიის Settings → Secrets and variables → Actions-ში ორი საიდუმლო უნდა იყოს:
+- GitHub repository: `apkhadzeangio/bina` (branch: `main`).
+- Cloudflare Pages project: `bina`.
+- Framework preset: **None**.
+- Build command: **ცარიელი** (საიტი წინასწარ არის აგებული).
+- Build output directory: `dist/site`.
+- Pages URL: https://bina-csn.pages.dev
+- Custom domain: https://bina.lithos.ge
 
-- `CLOUDFLARE_API_TOKEN` — Cloudflare-ის API ტოკენი, უფლებით Account → Cloudflare Pages → Edit.
-- `CLOUDFLARE_ACCOUNT_ID` — Cloudflare-ის ანგარიშის ID.
+`main` ბრენჩზე ყოველი ახალი push ავტომატურად იწვევს Cloudflare Pages-ის production deployment-ს. GitHub Actions-ის ცალკე Wrangler workflow და Cloudflare API token secrets აღარ არის საჭირო.
 
-კოდის შეცვლის შემდეგ: `npm test`, `npm run build`, შემდეგ commit და push.
+კოდის შეცვლის შემდეგ გაუშვი `npm test` და `npm run build`, შემდეგ commit/push გაუკეთე აგებულ `dist/site/index.html`-საც.
