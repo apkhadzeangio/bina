@@ -641,6 +641,55 @@ canvas.plan:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
   .refs-sec { flex-direction: column; align-items: flex-start; }
 }
 
+/* ------------------------------------------------------------------ AI rendering */
+.ai-cta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ai-btn { padding: 10px 16px; font-size: 14.5px; }
+.modal.ai-dialog { width: min(860px, calc(100vw - 24px)); }
+.ai-form { gap: 14px; }
+.ai-sec { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.ai-sec:first-of-type { border-top: 0; padding-top: 0; }
+.modal .ai-sec h3 { margin: 0; font-size: 15px; }
+.sec-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ai-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.ai-sketch { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: var(--view-bg); line-height: 0; }
+.ai-sketch img { width: 100%; height: auto; display: block; }
+.ai-sketch .sample-cap { left: 8px; bottom: 8px; }
+.ai-sketch-empty { padding: 48px 12px; text-align: center; color: var(--muted); line-height: 1.4; }
+.ai-side { display: flex; flex-direction: column; gap: 10px; }
+.ai-side .unit-sel { width: 100%; }
+.ai-mats { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 6px; }
+.ai-mats li { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 10px; align-items: center; padding: 6px; border: 1px solid var(--line); border-radius: 8px; }
+.ai-mats .sw { width: 40px; height: 40px; border-radius: 5px; display: block; }
+.ai-mat-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
+.ai-cost { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.ai-cost > div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; background: var(--panel-2); border-radius: 8px; }
+.ai-cost b { font-size: 14px; overflow-wrap: anywhere; }
+.ai-consent .check { align-items: flex-start; line-height: 1.45; }
+.ai-consent .check input { margin-top: 2px; flex: none; }
+.ai-note { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); }
+.ai-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ai-running { align-items: center; text-align: center; }
+.ai-running .ai-sketch { width: min(520px, 100%); }
+.ai-sketch-dim img { filter: grayscale(0.4) brightness(0.92); }
+.ai-spinner { position: absolute; inset: 0; margin: auto; width: 54px; height: 54px; border-radius: 50%; border: 4px solid rgba(255, 255, 255, 0.55); border-top-color: var(--accent); animation: ai-spin 0.9s linear infinite; }
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ai-spinner { animation-duration: 3s; } }
+.ai-elapsed { font-size: 28px; font-weight: 500; margin: 0; }
+.ai-result { position: relative; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.ai-result img { width: 100%; height: auto; border-radius: 10px; display: block; border: 1px solid var(--line); }
+.ai-label { position: absolute; top: 10px; left: 10px; font-size: 12px; font-weight: 600; padding: 4px 9px; border-radius: 6px; background: rgba(15, 18, 20, 0.7); color: #fff; }
+.ai-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.ai-thumb { display: flex; flex-direction: column; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); cursor: pointer; text-align: left; }
+.ai-thumb img { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 5px; display: block; background: var(--panel-2); }
+.ai-thumb .badge { align-self: flex-start; }
+.ai-missing { display: grid; place-items: center; aspect-ratio: 3 / 2; font-size: 12px; color: var(--muted); background: var(--panel-2); border-radius: 5px; padding: 6px; text-align: center; }
+@media (max-width: 640px) {
+  .ai-grid { grid-template-columns: 1fr; }
+  .ai-cta .muted { display: none; }
+  .ai-btn { width: 100%; }
+  .ai-actions .btn-lg { width: 100%; }
+}
+
 /* ------------------------------------------------------------------ estimate step */
 .step-estimate { overflow-y: auto; }
 .step-estimate > * { width: 100%; max-width: 1180px; margin-inline: auto; }

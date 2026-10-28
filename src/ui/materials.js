@@ -5,6 +5,7 @@ import { PURPOSES, roomLabel } from '../core/model.js';
 import { STYLES, STYLE_ORDER, TIERS, TIER_ORDER, CATEGORIES, SHOPS, materialsInCats, pick, priceLabel, shopLabel, CATALOG_NOTE } from '../core/catalog.js';
 import { product, COLOR_FAMILIES, VERIFICATION } from '../core/products.js';
 import { createBoard, provenanceBadges, sampleTile, exportReferences } from './material-board.js';
+import { createRenderDialog } from './ai-render.js';
 import { SURFACES, GLOBAL_SURFACES, resolveMaterial, roomSurfaces, allowedCats, setFinish, clearRoomFinish, globalKey } from '../core/finishes.js';
 import { measureProject } from '../core/measure.js';
 import { computeEstimate } from '../core/quantities.js';
@@ -29,11 +30,19 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
   const panel = h('div', { class: 'mat-panel' });
   const totalBar = h('div', { class: 'total-bar' });
   const dialog = h('dialog', { class: 'picker', id: 'picker' });
-  const board = createBoard({ onChange: (room, surface) => openPicker(room, surface) });
+  const board = createBoard({ onChange: (room, surface) => openPicker(room, surface), onRender: (roomId) => aiDialog.open(roomId) });
+  const aiDialog = createRenderDialog({
+    getView: () => view,
+    onEditMaterials: (roomId) => board.open(roomId),
+    onViewChanged: () => { syncView(); renderCaption(); },
+  });
+  const aiBtn = h('button', { type: 'button', class: 'btn btn-accent ai-btn', id: 'ai-render-btn', onclick: () => aiDialog.open(focusRoom) }, icon('sparkle', 18), 'AI დიზაინის გენერაცია');
+  const aiCta = h('div', { class: 'ai-cta' }, aiBtn, h('span', { class: 'muted small' }, 'ფოტორეალისტური კონცეფცია არჩეული ოთახის, ხედისა და მასალებით'));
   add(el, 
     h('div', { class: 'mat-layout' },
       h('div', { class: 'view-col' },
         h('div', { class: 'view-wrap' }, viewBox, viewMsg, h('div', { class: 'view-tools' }, viewSeg, cutBtn, cornerBtn)),
+        aiCta,
         viewCaption),
       h('div', { class: 'mat-col' }, panel, totalBar)),
     dialog,
@@ -405,6 +414,7 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
     if (state.step !== 'materials') return;
     if (kind === 'project' || kind === 'theme') {
       board.refresh();
+      aiDialog.refresh();
       render();
       renderCaption();
       if (view) view.update(current(), { refit: needsRefit });

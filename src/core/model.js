@@ -137,6 +137,7 @@ export function emptyProject() {
     rooms: [],
     openings: [],
     furniture: [], // see furniture.js
+    renders: [], // saved AI visualizations (metadata; the images stay in the browser), see cleanRenders
     plan: null, // { hasImage, x, y, mPerPx, w, h, opacity, visible }
     style: 'modern',
     tier: 'mid',
@@ -415,12 +416,48 @@ export function migrateProject(raw, report = {}) {
   p.finish = { global: cleanMap(finish.global), rooms };
   const refs = cleanRefs(finish.refs, byId);
   if (Object.keys(refs).length) p.finish.refs = refs;
+  p.renders = cleanRenders(raw.renders);
   p.version = SCHEMA_VERSION;
   return p;
 }
 
 // Only embedded raster images are accepted as a saved plan image; anything else (a remote
 // URL, an SVG that could run script, a non-string) is ignored.
+// Saved AI visualizations: what was rendered, from which scene revision, by which model,
+// at what cost. The image itself is kept in the browser's storage under the same id.
+export const RENDER_LIMIT = 200;
+export function cleanRenders(list) {
+  if (!Array.isArray(list)) return [];
+  const xyz = (v) => isObj(v) && ['x', 'y', 'z'].every((k) => finite(v[k])) ? { x: num(v.x), y: num(v.y), z: num(v.z) } : null;
+  const out = [];
+  const ids = new Set();
+  for (const r of list) {
+    if (!isObj(r) || out.length >= RENDER_LIMIT) continue;
+    if (typeof r.id !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(r.id) || ids.has(r.id)) continue;
+    if (typeof r.roomId !== 'string' || !r.roomId || r.roomId.length > 64) continue;
+    if (typeof r.sceneRevision !== 'string' || !/^s1-[0-9a-f]{14}$/.test(r.sceneRevision)) continue;
+    if (typeof r.createdAt !== 'string' || Number.isNaN(Date.parse(r.createdAt))) continue;
+    const camera = isObj(r.camera) ? { position: xyz(r.camera.position), target: xyz(r.camera.target), fov: finite(r.camera.fov) ? num(r.camera.fov) : 64 } : null;
+    if (!camera || !camera.position || !camera.target) continue;
+    ids.add(r.id);
+    out.push({
+      id: r.id,
+      roomId: r.roomId,
+      sceneRevision: r.sceneRevision,
+      createdAt: new Date(r.createdAt).toISOString(),
+      provider: ['openai', 'gemini'].includes(r.provider) ? r.provider : 'unknown',
+      model: typeof r.model === 'string' && /^[A-Za-z0-9._-]{1,64}$/.test(r.model) ? r.model : 'unknown',
+      quality: ['low', 'medium', 'high'].includes(r.quality) ? r.quality : 'medium',
+      aspect: ['landscape', 'portrait', 'square'].includes(r.aspect) ? r.aspect : 'landscape',
+      style: typeof r.style === 'string' && STYLES[r.style] ? r.style : 'modern',
+      costUsd: finite(r.costUsd) && num(r.costUsd) >= 0 ? num(r.costUsd) : null,
+      costBasis: r.costBasis === 'usage' ? 'usage' : 'estimate',
+      camera,
+    });
+  }
+  return out;
+}
+
 export function cleanPlanImage(v) {
   return typeof v === 'string' && /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(v) ? v : null;
 }

@@ -5,7 +5,7 @@ import { MATERIALS, priceLabel } from '../core/catalog.js';
 import { product, refKind, REF_KINDS, VERIFICATION, AVAILABILITY } from '../core/products.js';
 import { roomBoard, apartmentBoard, referencePackage } from '../core/references.js';
 import { setRefPrefs } from '../core/finishes.js';
-import { roomLabel } from '../core/model.js';
+import { roomLabel, PURPOSES } from '../core/model.js';
 import { h, add, clear, icon, toast, copyText } from './dom.js';
 import { swatch } from './textures.js';
 
@@ -57,7 +57,7 @@ export async function exportReferences(roomId = null) {
   else toast(ok ? 'AI-ის რეფერენსები დაკოპირდა (JSON).' : 'კოპირება ვერ მოხერხდა.', ok ? 'ok' : 'warn');
 }
 
-export function createBoard({ onChange }) {
+export function createBoard({ onChange, onRender }) {
   const dlg = h('dialog', { class: 'modal board', 'aria-labelledby': 'board-title' });
   document.body.append(dlg);
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
@@ -128,7 +128,8 @@ export function createBoard({ onChange }) {
         refs.length ? h('div', { class: 'board-grid' }, refs.map((r) => card(r, room))) : h('p', null, 'ამ ოთახს მასალები არ აქვს.'),
         h('div', { class: 'btn-row' },
           h('button', { type: 'button', class: 'btn btn-accent', onclick: () => exportReferences(roomId) }, icon('download', 16), room ? 'ამ ოთახის AI რეფერენსები' : 'AI რეფერენსები'),
-          room ? h('button', { type: 'button', class: 'btn', onclick: () => exportReferences(null) }, 'მთელი ბინის') : null)),
+          room ? h('button', { type: 'button', class: 'btn', onclick: () => exportReferences(null) }, 'მთელი ბინის') : null,
+          room && onRender && !PURPOSES[room.purpose]?.outdoor ? h('button', { type: 'button', class: 'btn', onclick: () => { dlg.close(); onRender(room.id); } }, icon('sparkle', 16), 'AI დიზაინის გენერაცია') : null)),
     );
   }
 

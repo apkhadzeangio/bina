@@ -679,6 +679,36 @@ export function createView3D({ THREE, container, onPickRoom }) {
     get view() {
       return { kind: viewKind, roomId: eye?.roomId || null, corner: eye?.corner || 0 };
     },
+    // A picture of the current view at an exact size (the layout sketch for an AI render).
+    // Renders off-screen-size, reads the pixels in the same task, then restores the view.
+    // Without a size it captures the view as shown (the Stage 03 behaviour).
+    snapshot({ width, height, type = 'image/jpeg', quality = 0.85 } = {}) {
+      if (!width || !height) {
+        render();
+        return renderer.domElement.toDataURL(type, quality);
+      }
+      const size = new THREE.Vector2();
+      renderer.getSize(size);
+      const ratio = renderer.getPixelRatio();
+      const aspect = camera.aspect;
+      const outlineVisible = outline ? outline.visible : null;
+      if (outline) outline.visible = false;
+      try {
+        renderer.setPixelRatio(1);
+        renderer.setSize(width, height, false);
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        render();
+        return renderer.domElement.toDataURL(type, quality);
+      } finally {
+        if (outline) outline.visible = outlineVisible;
+        renderer.setPixelRatio(ratio);
+        renderer.setSize(size.x, size.y, false);
+        camera.aspect = aspect;
+        camera.updateProjectionMatrix();
+        render();
+      }
+    },
     // The current camera, for saving with the project or sending with an AI request.
     cameraState() {
       return {
@@ -717,10 +747,6 @@ export function createView3D({ THREE, container, onPickRoom }) {
     setCamera(c) {
       Object.assign(ctl, c);
       render();
-    },
-    snapshot() {
-      render();
-      return renderer.domElement.toDataURL('image/jpeg', 0.85);
     },
   };
 }
