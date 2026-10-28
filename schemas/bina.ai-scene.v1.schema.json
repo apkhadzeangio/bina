@@ -1,0 +1,1275 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://bina.local/schemas/bina.ai-scene.v1.schema.json",
+  "title": "BINA AI scene v1",
+  "description": "Provider independent room scene. Geometry is authoritative; all lengths are metres. See docs/stage05/schema.md for semantic checks and revision rules.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "bina.ai-scene"
+    },
+    "version": {
+      "const": 1
+    },
+    "applicationVersion": {
+      "type": "string"
+    },
+    "coordinates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "units": {
+          "const": "metres"
+        },
+        "x": {
+          "const": "plan right"
+        },
+        "y": {
+          "const": "plan down"
+        },
+        "z": {
+          "const": "height above floor"
+        },
+        "polygonWinding": {
+          "const": "clockwise in plan"
+        },
+        "rotation": {
+          "const": "clockwise plan degrees"
+        },
+        "threeMapping": {
+          "const": "world.x=scene.x; world.y=scene.z; world.z=scene.y"
+        },
+        "fov": {
+          "const": "vertical degrees"
+        }
+      },
+      "required": [
+        "units",
+        "x",
+        "y",
+        "z",
+        "polygonWinding",
+        "rotation",
+        "threeMapping",
+        "fov"
+      ]
+    },
+    "projectFingerprint": {
+      "type": "string",
+      "pattern": "^fnv1a64-[0-9a-f]{16}$"
+    },
+    "revision": {
+      "type": "string",
+      "pattern": "^fnv1a64-[0-9a-f]{16}$"
+    },
+    "room": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "polygon": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/point2"
+          },
+          "minItems": 3
+        },
+        "bounds": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "minX": {
+              "type": "number"
+            },
+            "minY": {
+              "type": "number"
+            },
+            "maxX": {
+              "type": "number"
+            },
+            "maxY": {
+              "type": "number"
+            },
+            "w": {
+              "type": "number"
+            },
+            "h": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "minX",
+            "minY",
+            "maxX",
+            "maxY",
+            "w",
+            "h"
+          ]
+        },
+        "areaM2": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "ceilingHeight": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "heightSource": {
+          "enum": [
+            "room",
+            "project",
+            "application-default"
+          ]
+        },
+        "walls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "start": {
+                "$ref": "#/$defs/point2"
+              },
+              "end": {
+                "$ref": "#/$defs/point2"
+              },
+              "length": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "orientation": {
+                "type": "number"
+              },
+              "inward": {
+                "$ref": "#/$defs/point2"
+              }
+            },
+            "required": [
+              "index",
+              "start",
+              "end",
+              "length",
+              "orientation",
+              "inward"
+            ]
+          },
+          "minItems": 3
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "type",
+        "polygon",
+        "bounds",
+        "areaM2",
+        "ceilingHeight",
+        "heightSource",
+        "walls"
+      ]
+    },
+    "openings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "door",
+              "entrance",
+              "arch",
+              "window",
+              "balcony"
+            ]
+          },
+          "ownerRoomId": {
+            "type": "string"
+          },
+          "hosted": {
+            "type": "boolean"
+          },
+          "edge": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "number"
+          },
+          "center": {
+            "$ref": "#/$defs/point2"
+          },
+          "width": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "height": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "sill": {
+            "type": "number",
+            "minimum": 0
+          },
+          "start": {
+            "$ref": "#/$defs/point2"
+          },
+          "end": {
+            "$ref": "#/$defs/point2"
+          },
+          "visibleSpan": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "start": {
+                "type": "number"
+              },
+              "end": {
+                "type": "number"
+              },
+              "top": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "start",
+              "end",
+              "top"
+            ]
+          },
+          "connectedRoomId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "ownerRoomId",
+          "hosted",
+          "edge",
+          "offset",
+          "center",
+          "width",
+          "height",
+          "sill",
+          "start",
+          "end",
+          "visibleSpan",
+          "connectedRoomId"
+        ]
+      }
+    },
+    "furniture": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "position": {
+            "$ref": "#/$defs/point3"
+          },
+          "size": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "width": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "depth": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "height": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "required": [
+              "width",
+              "depth",
+              "height"
+            ]
+          },
+          "rotation": {
+            "type": "number",
+            "minimum": 0,
+            "exclusiveMaximum": 360
+          },
+          "footprint": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/point2"
+            },
+            "minItems": 4,
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "position",
+          "size",
+          "rotation",
+          "footprint"
+        ]
+      }
+    },
+    "materials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "target": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "roomId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "roomLabel": {
+                "type": "string"
+              },
+              "roomPurpose": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "roomEn": {
+                "type": "string"
+              },
+              "surface": {
+                "type": "string"
+              },
+              "surfaceLabel": {
+                "type": "string"
+              },
+              "surfaceEn": {
+                "type": "string"
+              },
+              "areaM2": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "roomId",
+              "roomLabel",
+              "roomPurpose",
+              "roomEn",
+              "surface",
+              "surfaceLabel",
+              "surfaceEn",
+              "areaM2"
+            ]
+          },
+          "materialId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "resolved",
+              "unresolved"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "product-image",
+              "product-approx",
+              "preference",
+              null
+            ]
+          },
+          "mandatory": {
+            "type": "boolean"
+          },
+          "chosenBy": {
+            "enum": [
+              "room",
+              "apartment",
+              "style"
+            ]
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "manufacturer": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "category": {
+                    "type": "string"
+                  },
+                  "categoryLabel": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "colorHex": {
+                    "type": "string"
+                  },
+                  "colorFamily": {
+                    "type": "string"
+                  },
+                  "colorIsPreference": {
+                    "type": "boolean"
+                  },
+                  "finish": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "finishEn": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "pattern": {
+                    "type": "string"
+                  },
+                  "patternEn": {
+                    "type": "string"
+                  },
+                  "unitSize": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "unitSizeM": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "length": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          },
+                          "width": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          }
+                        },
+                        "required": [
+                          "length",
+                          "width"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "thicknessMm": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "manufacturer",
+                  "category",
+                  "categoryLabel",
+                  "description",
+                  "colorHex",
+                  "colorFamily",
+                  "colorIsPreference",
+                  "finish",
+                  "finishEn",
+                  "pattern",
+                  "patternEn",
+                  "unitSize",
+                  "unitSizeM",
+                  "thicknessMm"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "identity": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "retailer": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "retailerCode": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "productUrl": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "verification": {
+                    "type": "string"
+                  },
+                  "verificationLabel": {
+                    "type": "string"
+                  },
+                  "verifiedOn": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "retailer",
+                  "retailerCode",
+                  "productUrl",
+                  "verification",
+                  "verificationLabel",
+                  "verifiedOn"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "visual": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "image": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "pattern": "^/assets/materials/"
+                      },
+                      "license": {
+                        "enum": [
+                          "own",
+                          "permission",
+                          "cc-by",
+                          "cc0"
+                        ]
+                      },
+                      "holder": {
+                        "type": "string"
+                      },
+                      "checked": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "license",
+                      "holder",
+                      "checked"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "retailerPage": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "swatch": {
+                "enum": [
+                  "synthetic-approximate",
+                  null
+                ]
+              }
+            },
+            "required": [
+              "image",
+              "swatch"
+            ]
+          },
+          "layout": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "pattern": {
+                    "type": "string"
+                  },
+                  "direction": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "planAxis": {
+                    "enum": [
+                      "x",
+                      "y",
+                      null
+                    ]
+                  },
+                  "chosen": {
+                    "type": "boolean"
+                  },
+                  "en": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pattern",
+                  "direction",
+                  "planAxis",
+                  "chosen",
+                  "en"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "target",
+          "materialId",
+          "status",
+          "kind",
+          "mandatory",
+          "chosenBy",
+          "material",
+          "identity",
+          "visual",
+          "layout",
+          "prompt"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "unresolved"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "kind": {
+                  "type": "null"
+                },
+                "material": {
+                  "type": "null"
+                },
+                "identity": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "resolved"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "product-image",
+                    "product-approx",
+                    "preference"
+                  ]
+                },
+                "material": {
+                  "type": "object"
+                },
+                "layout": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "finishRegions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tileHeight": {
+          "anyOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kitchenRuns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "edge": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "start": {
+                "type": "number"
+              },
+              "length": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "edge",
+              "start",
+              "length",
+              "id"
+            ]
+          }
+        },
+        "conventions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "counterHeight": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "backsplashHeight": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "counterDepth": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "counterHeight",
+            "backsplashHeight",
+            "counterDepth"
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tileHeight",
+        "kitchenRuns",
+        "conventions",
+        "note"
+      ]
+    },
+    "preferences": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "style": {
+          "type": "string"
+        },
+        "lighting": {
+          "enum": [
+            "daylight",
+            "warm",
+            "evening"
+          ]
+        },
+        "instructions": {
+          "type": "string",
+          "maxLength": 1200
+        }
+      },
+      "required": [
+        "style",
+        "lighting",
+        "instructions"
+      ]
+    },
+    "camera": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "ready",
+            "unavailable"
+          ]
+        },
+        "roomId": {
+          "type": "string"
+        },
+        "preset": {
+          "enum": [
+            "entrance",
+            "window",
+            "opposite",
+            "wide",
+            "custom"
+          ]
+        },
+        "fov": {
+          "type": "number",
+          "minimum": 25,
+          "maximum": 100
+        },
+        "aspect": {
+          "enum": [
+            1.7777777777777777,
+            1.3333333333333333,
+            1
+          ]
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/point3"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/point3"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fallback": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sceneRevision": {
+          "type": "string",
+          "pattern": "^fnv1a64-[0-9a-f]{16}$"
+        }
+      },
+      "required": [
+        "status",
+        "roomId",
+        "preset",
+        "fov",
+        "aspect",
+        "position",
+        "target",
+        "fallback",
+        "sceneRevision"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "ready"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "position": {
+                "$ref": "#/$defs/point3"
+              },
+              "target": {
+                "$ref": "#/$defs/point3"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "position": {
+                "type": "null"
+              },
+              "target": {
+                "type": "null"
+              },
+              "fallback": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hard": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "preserve": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "mandatoryMaterials": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "materialId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "resolved",
+                      "unresolved"
+                    ]
+                  }
+                },
+                "required": [
+                  "key",
+                  "materialId",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "preserve",
+            "mandatoryMaterials"
+          ]
+        },
+        "flexible": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "materials": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "allowed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "materials",
+            "allowed"
+          ]
+        },
+        "exclusions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "limitation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hard",
+        "flexible",
+        "exclusions",
+        "limitation"
+      ]
+    },
+    "references": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "plan": {
+          "$ref": "#/$defs/asset"
+        },
+        "blockout": {
+          "$ref": "#/$defs/asset"
+        }
+      },
+      "required": [
+        "plan",
+        "blockout"
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "applicationVersion",
+    "coordinates",
+    "projectFingerprint",
+    "revision",
+    "room",
+    "openings",
+    "furniture",
+    "materials",
+    "finishRegions",
+    "preferences",
+    "camera",
+    "constraints",
+    "references",
+    "warnings"
+  ],
+  "$defs": {
+    "point2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ]
+    },
+    "point3": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "z"
+      ]
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "pending",
+            "included",
+            "missing",
+            "omitted"
+          ]
+        },
+        "filename": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "filename",
+        "reason"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "included"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "filename": {
+                "type": "string",
+                "pattern": "^(plan|blockout)-reference\\.png$"
+              },
+              "reason": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "filename": {
+                "type": "null"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

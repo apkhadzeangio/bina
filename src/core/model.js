@@ -313,6 +313,30 @@ function cleanPlan(pl) {
   };
 }
 
+// Optional Stage 05 settings, still schema 2. Never persist reference image payloads.
+function cleanScenePreparation(raw, roomIds) {
+  if (!isObj(raw)) return null;
+  const rooms = {};
+  for (const [id, value] of Object.entries(isObj(raw.rooms) ? raw.rooms : {})) {
+    if (!roomIds.has(id) || !isObj(value)) continue;
+    const s = {};
+    if (['entrance', 'window', 'opposite', 'wide', 'custom'].includes(value.preset)) s.preset = value.preset;
+    if ([16 / 9, 4 / 3, 1].includes(value.aspect)) s.aspect = value.aspect;
+    if (Number.isFinite(value.fov) && value.fov >= 25 && value.fov <= 100) s.fov = value.fov;
+    if (['daylight', 'warm', 'evening'].includes(value.lighting)) s.lighting = value.lighting;
+    s.instructions = str(value.instructions, 1200).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, '');
+    const c = value.camera;
+    const validPoint = (p) => isObj(p) && ['x', 'y', 'z'].every((k) => Number.isFinite(p[k]) && Math.abs(p[k]) <= LIMITS.maxCoord);
+    if (isObj(c) && c.roomId === id && validPoint(c.position) && validPoint(c.target)) {
+      s.camera = { status: 'ready', roomId: id, preset: s.preset || 'custom', position: { x: c.position.x, y: c.position.y, z: c.position.z },
+        target: { x: c.target.x, y: c.target.y, z: c.target.z }, fov: s.fov || 64, aspect: s.aspect || 16 / 9,
+        sceneRevision: str(c.sceneRevision, 80), fallback: null };
+    }
+    rooms[id] = s;
+  }
+  return { roomId: roomIds.has(raw.roomId) ? raw.roomId : null, rooms };
+}
+
 // Bring older, partial or hand-edited project JSON up to the current shape. Every value is
 // checked, because saved data comes from the browser or from files people send each other:
 // a single bad number must not crash the drawing or turn the estimate into NaN. Items that
@@ -415,6 +439,8 @@ export function migrateProject(raw, report = {}) {
   p.finish = { global: cleanMap(finish.global), rooms };
   const refs = cleanRefs(finish.refs, byId);
   if (Object.keys(refs).length) p.finish.refs = refs;
+  const scenePreparation = cleanScenePreparation(raw.scenePreparation, byId);
+  if (scenePreparation) p.scenePreparation = scenePreparation;
   p.version = SCHEMA_VERSION;
   return p;
 }

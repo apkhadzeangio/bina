@@ -1,0 +1,105 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> bina-designer@1.0.0 test:e2e
+> node test/e2e/acceptance.mjs && node test/e2e/materials.mjs && node test/e2e/scene.mjs
+
+{
+ "ok": true,
+ "screenshots": "/workspace/scratch/626ca4c3a071/bina/e2e-shots",
+ "desktop": {
+  "bed": {
+   "id": "fmvsa6q13194g",
+   "type": "bed_double",
+   "category": "bedroom",
+   "roomId": "rmvsa6p0i18p7",
+   "x": 4.8,
+   "y": 4.93,
+   "w": 1.6,
+   "d": 2,
+   "h": 0.5,
+   "rot": 90
+  },
+  "wardrobe": {
+   "id": "fmvsa6qz21a5l",
+   "type": "wardrobe",
+   "category": "bedroom",
+   "roomId": "rmvsa6p0i18p7",
+   "x": 5.5,
+   "y": 2.64,
+   "w": 1.6,
+   "d": 0.6,
+   "h": 2.2,
+   "rot": 90
+  }
+ },
+ "phone": {
+  "bed": {
+   "id": "fmvsa6q13194g",
+   "type": "bed_double",
+   "category": "bedroom",
+   "roomId": "rmvsa6p0i18p7",
+   "x": 4.8,
+   "y": 5.33,
+   "w": 1.6,
+   "d": 2,
+   "h": 0.5,
+   "rot": 90
+  }
+ }
+}
+{
+  "ok": true,
+  "storedIds": {
+    "floor": "lam_kt502",
+    "walls": "paint_mid_sage",
+    "countertop": "st_calacatta"
+  },
+  "estimate": 3665
+}
+{
+  "desktop": {
+    "pixels": {
+      "width": 1280,
+      "height": 720,
+      "colors": 405
+    },
+    "revision": "fnv1a64-307c4e0f09386857",
+    "zipAssets": {
+      "plan": {
+        "status": "included",
+        "filename": "plan-reference.png",
+        "reason": null
+      },
+      "blockout": {
+        "status": "included",
+        "filename": "blockout-reference.png",
+        "reason": null
+      }
+    },
+    "sharedRenderer": true
+  },
+  "kitchen": {
+    "revision": "fnv1a64-3360ca17d5dc5ed0",
+    "materials": [
+      "lam_kt502",
+      "paint_mid_sage",
+      "wt_void_bone",
+      "st_calacatta",
+      "cf_light_oak",
+      "ceil_stretch",
+      "sk_modern",
+      "st_hierapolis"
+    ]
+  },
+  "mobile": {
+    "touch": true,
+    "aspect": 1,
+    "noOverflow": true
+  },
+  "unsupportedWebGL": {
+    "retainedPlan": true,
+    "retry": true
+  },
+  "ok": true,
+  "unexpectedRequests": []
+}
