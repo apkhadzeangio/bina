@@ -1,15 +1,26 @@
 // Plan editor: trace rooms over the developer's plan (or on a grid), place doors and
 // windows on walls, and fix exact wall lengths. World units are metres.
 import {
-  state, current, commit, preview, cancelPreview, setSelection, setTool, subscribe, undo, redo,
+  state, current, commit, preview, cancelPreview, setSelection, setTool, subscribe, undo, redo, setSnap,
 } from './store.js';
 import * as G from '../core/geometry.js';
 import { makeRoom, makeOpening, OPENING_TYPES, PURPOSES, roomLabel } from '../core/model.js';
-import { openingHosts, openingCenter, kitchenRuns } from '../core/measure.js';
-import { withRoomPoints, moveRoom, addRoom, addOpening, updateOpening, deleteRoom, deleteOpening, clampOffset } from '../core/ops.js';
-import { h, add, clear, cssVar, fmtNum, parseNum, toast } from './dom.js';
+import { openingHosts } from '../core/measure.js';
+import {
+  withRoomPoints, moveRoom, addRoom, addOpening, updateOpening, deleteRoom, deleteOpening, clampOffset,
+  updateFurniture, moveFurniture, deleteFurniture, duplicateFurniture, rotateFurniture,
+} from '../core/ops.js';
+import {
+  FURNITURE, corners, toLocal as fLocal, toWorld as fWorld, sideInfo, snapToWalls, distancesToWalls, roomAt, frontZone,
+  furnitureLabel, sideToWall, wallRot, normRot, overlapDepth,
+} from '../core/furniture.js';
+import { analyzeFurniture, issueLevel, openingZones } from '../core/layout.js';
+import { drawFurnitureSymbol } from './furniture-draw.js';
+import { h, add, clear, cssVar, fmtNum, parseNum, toast, icon } from './dom.js';
 
 const WALL_BAND = 0.15; // drawn wall thickness outside each room contour, metres
+const DEG = Math.PI / 180;
+const editing = (m) => !!m && (m.startsWith('drag') || m.startsWith('f-'));
 
 export function purposeColorVar(purpose) {
   if (purpose === 'hall') return '--p-hall';
@@ -17,7 +28,7 @@ export function purposeColorVar(purpose) {
   return `--p-${g}`;
 }
 
-export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
+export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated, onOpenLibrary }) {
   const ctx = canvas.getContext('2d');
   const view = { s: 60, ox: 40, oy: 40 };
   let W = 0;
@@ -45,6 +56,11 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
   let holdTimer = null; // long-press before a selected room can be moved by touch
   let nudge = null; // last arrow-key move, to merge a burst into one undo step
   let fittedOnce = false;
+  let wallGuides = []; // walls a piece of furniture is being snapped to
+  let issuesOf = null; // furniture checks, recomputed when the project changes
+  let issuesMap = new Map();
+  let labelsOf = null; // room label positions that keep clear of furniture
+  let labelMap = new Map();
 
   // ---------------------------------------------------------------- coordinates
   const sx = (x) => x * view.s + view.ox;
@@ -58,7 +74,7 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
   }
 
   function readColors() {
-    const names = ['--plan-bg', '--grid', '--grid-major', '--ink', '--muted', '--accent', '--accent-soft', '--warn', '--panel', '--p-dry', '--p-kitchen', '--p-wet', '--p-hall', '--p-utility', '--p-outdoor', '--wall'];
+    const names = ['--plan-bg', '--grid', '--grid-major', '--ink', '--muted', '--accent', '--accent-soft', '--warn', '--warn-soft', '--panel', '--p-dry', '--p-kitchen', '--p-wet', '--p-hall', '--p-utility', '--p-outdoor', '--wall', '--furn', '--furn-ink'];
     colors = Object.fromEntries(names.map((n) => [n, cssVar(n) || '#888']));
   }
 
@@ -202,9 +218,50 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     };
   }
 
+  function selectedFurniture() {
+    const s = state.selection;
+    if (!s || s.type !== 'furniture') return null;
+    return (current().furniture || []).find((f) => f.id === s.id) || null;
+  }
+
+  // Screen positions of the handles of the selected piece: one per side to change its
+  // size, and a round one in front of it to turn it (it also shows which way it faces).
+  function sideHandle(f, side) {
+    const si = sideInfo(f, side);
+    const len = si.along * 2 * view.s;
+    if (len < (coarse ? 30 : 18)) return null;
+    return S({ x: f.x + si.nx * si.across, y: f.y + si.ny * si.across });
+  }
+  function rotateHandle(f) {
+    const si = sideInfo(f, 'front');
+    const base = S({ x: f.x + si.nx * si.across, y: f.y + si.ny * si.across });
+    const k = coarse ? 34 : 24;
+    return { x: base.x + si.nx * k, y: base.y + si.ny * k, base };
+  }
+
+  function furnitureAt(px, py) {
+    const list = current().furniture || [];
+    const w = toWorld(px, py);
+    for (let i = list.length - 1; i >= 0; i--) {
+      const f = list[i];
+      const small = Math.max(f.w, f.d) * view.s < 16;
+      if (small ? Math.hypot(sx(f.x) - px, sy(f.y) - py) < 10 : G.pointInPolygon(w, corners(f))) return f;
+    }
+    return null;
+  }
+
   function hitTest(px, py) {
     const p = current();
     const w = toWorld(px, py);
+    const sf = selectedFurniture();
+    if (sf) {
+      const rh = rotateHandle(sf);
+      if (Math.hypot(rh.x - px, rh.y - py) < (coarse ? 22 : 12)) return { kind: 'f-rotate', f: sf };
+      for (const side of ['right', 'left', 'front', 'back']) {
+        const q = sideHandle(sf, side);
+        if (q && Math.hypot(q.x - px, q.y - py) < (coarse ? 18 : 8)) return { kind: 'f-resize', f: sf, side };
+      }
+    }
     const sel = selectedRoom();
     if (sel) {
       for (let i = 0; i < sel.points.length; i++) {
@@ -212,14 +269,20 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
         if (Math.hypot(q.x - px, q.y - py) < (coarse ? 20 : 9)) return { kind: 'vertex', room: sel, i };
       }
     }
-    // openings (any room)
+    // Openings right on the wall line win over furniture standing against that wall;
+    // a little further in, the furniture is picked.
+    let opHit = null;
     for (const op of p.openings) {
       const room = p.rooms.find((r) => r.id === op.roomId);
       if (!room) continue;
       const seg = openingSegment(room, op);
       const r = G.projectOnSegment({ x: px, y: py }, S(seg.p0), S(seg.p1));
-      if (r.d < (coarse ? 14 : 8)) return { kind: 'opening', op, room };
+      if (r.d < (coarse ? 14 : 8) && (!opHit || r.d < opHit.d)) opHit = { kind: 'opening', op, room, d: r.d };
     }
+    if (opHit && opHit.d < 4) return opHit;
+    const f = furnitureAt(px, py);
+    if (f) return { kind: 'furniture', f };
+    if (opHit) return opHit;
     if (sel) {
       for (let i = 0; i < sel.points.length; i++) {
         const a = S(sel.points[i]);
@@ -270,13 +333,14 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     const linkedOps = new Set(links.map((l) => l.opId));
     for (const r of p.rooms) drawRoomFill(r, imageOn);
     drawPoche(p, imageOn);
-    drawKitchen(p);
+    drawFurniture(p);
     for (const r of p.rooms) drawRoomOutline(r);
     for (const op of p.openings) {
       const room = p.rooms.find((r) => r.id === op.roomId);
       if (room) drawOpening(room, op, linkedOps.has(op.id));
     }
     for (const r of p.rooms) drawRoomLabel(r, p);
+    drawFurnitureSelection(p);
     drawSelection(p);
     drawHoverEdge(p);
     drawToolPreview();
@@ -373,31 +437,170 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     ctx.restore();
   }
 
-  // Kitchen base cabinets as a dashed footprint along their walls.
-  function drawKitchen(p) {
-    for (const r of p.rooms) {
-      if (!PURPOSES[r.purpose]?.kitchen) continue;
-      for (const run of kitchenRuns(r)) {
-        const e = G.edge(r.points, run.edge);
-        const a = { x: e.a.x + e.ux * run.start, y: e.a.y + e.uy * run.start };
-        const b = { x: a.x + e.ux * run.length, y: a.y + e.uy * run.length };
-        const d = 0.6;
-        const q = [a, b, { x: b.x + e.nx * d, y: b.y + e.ny * d }, { x: a.x + e.nx * d, y: a.y + e.ny * d }].map(S);
+  // ------------------------------------------------------------ furniture
+  function issues(p) {
+    if (issuesOf !== p) {
+      issuesMap = analyzeFurniture(p);
+      issuesOf = p;
+    }
+    return issuesMap;
+  }
+
+  function drawFurniture(p) {
+    const list = p.furniture || [];
+    if (!list.length) return;
+    const iss = issues(p);
+    const sel = state.selection?.type === 'furniture' ? state.selection.id : null;
+    for (const f of list) {
+      const level = issueLevel(iss.get(f.id));
+      ctx.save();
+      ctx.translate(sx(f.x), sy(f.y));
+      ctx.rotate(f.rot * DEG);
+      ctx.scale(view.s, view.s);
+      const ink = f.id === sel ? colors['--accent'] : level === 'error' ? colors['--warn'] : colors['--furn-ink'];
+      drawFurnitureSymbol(ctx, f.type, f.w, f.d, { ink, fill: colors['--furn'], lw: (f.id === sel ? 1.8 : 1.1) / view.s });
+      ctx.restore();
+      if (level) {
+        // a small badge on the front corner: red for overlaps and walls, orange for space
+        const q = S(fWorld(f, f.w / 2, f.d / 2));
+        ctx.fillStyle = colors['--warn'];
         ctx.beginPath();
-        q.forEach((v, i) => (i ? ctx.lineTo(v.x, v.y) : ctx.moveTo(v.x, v.y)));
-        ctx.closePath();
-        ctx.save();
-        ctx.globalAlpha = 0.08;
-        ctx.fillStyle = colors['--ink'];
+        ctx.arc(q.x, q.y, coarse ? 8 : 6.5, 0, Math.PI * 2);
         ctx.fill();
-        ctx.globalAlpha = 0.6;
-        ctx.setLineDash([4, 3]);
-        ctx.strokeStyle = colors['--ink'];
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.restore();
+        ctx.fillStyle = colors['--panel'];
+        ctx.font = `700 ${coarse ? 11 : 10}px ${cssVar('--font-mono')}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(level === 'error' ? '!' : '·', q.x, q.y + 0.5);
       }
     }
+  }
+
+  function fillPoly(poly, fill, stroke, dash) {
+    ctx.beginPath();
+    poly.forEach((q, i) => {
+      const v = S(q);
+      if (i) ctx.lineTo(v.x, v.y);
+      else ctx.moveTo(v.x, v.y);
+    });
+    ctx.closePath();
+    if (fill) {
+      ctx.fillStyle = fill;
+      ctx.fill();
+    }
+    if (stroke) {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 1;
+      ctx.setLineDash(dash || []);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  function label(x, y, text, color, bg) {
+    ctx.font = `500 11.5px ${cssVar('--font-mono')}`;
+    const tw = ctx.measureText(text).width;
+    ctx.fillStyle = bg || colors['--panel'];
+    ctx.globalAlpha = 0.94;
+    ctx.fillRect(x - tw / 2 - 4, y - 9, tw + 8, 18);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = color || colors['--accent'];
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y + 0.5);
+  }
+
+  // The selected piece: the space it needs in front, the doors it blocks, how far it is
+  // from the walls, its size, and the handles.
+  function drawFurnitureSelection(p) {
+    const f = selectedFurniture();
+    if (!f) return;
+    const def = FURNITURE[f.type];
+    const room = p.rooms.find((r) => r.id === f.roomId);
+    ctx.save();
+    if (def.clear) fillPoly(frontZone(f, def.clear), colors['--accent-soft'], colors['--accent'], [3, 3]);
+    const poly = corners(f);
+    for (const z of openingZones(p).zones) {
+      if (overlapDepth(poly, z.poly) > 0.01) fillPoly(z.poly, colors['--warn-soft'], colors['--warn'], [3, 3]);
+    }
+    for (const e of wallGuides) {
+      const A = S(e.a);
+      const B = S(e.b);
+      ctx.strokeStyle = colors['--accent'];
+      ctx.lineWidth = 4;
+      ctx.globalAlpha = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(A.x, A.y);
+      ctx.lineTo(B.x, B.y);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    // free distance to the walls or the next piece, in centimetres
+    if (room) {
+      const others = (p.furniture || []).filter((x) => x.id !== f.id && x.roomId === room.id).map((x) => corners(x));
+      const dist = distancesToWalls(f, room, others);
+      ctx.strokeStyle = colors['--accent'];
+      ctx.lineWidth = 1;
+      for (const side of Object.keys(dist)) {
+        const { d, from, to } = dist[side];
+        if (d < 0.01 || d > 4) continue;
+        const A = S(from);
+        const B = S(to);
+        if (Math.hypot(B.x - A.x, B.y - A.y) < 26) continue;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath();
+        ctx.moveTo(A.x, A.y);
+        ctx.lineTo(B.x, B.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        label((A.x + B.x) / 2, (A.y + B.y) / 2, fmtNum(d * 100, 0));
+      }
+    }
+    // outline, handles
+    fillPoly(poly, null, colors['--accent']);
+    const rh = rotateHandle(f);
+    ctx.strokeStyle = colors['--accent'];
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(rh.base.x, rh.base.y);
+    ctx.lineTo(rh.x, rh.y);
+    ctx.stroke();
+    const rr = coarse ? 11 : 8;
+    ctx.fillStyle = colors['--accent'];
+    ctx.beginPath();
+    ctx.arc(rh.x, rh.y, rr, 0, Math.PI * 2);
+    ctx.fill();
+    // a turning arrow inside the round handle
+    ctx.strokeStyle = colors['--panel'];
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(rh.x, rh.y, rr * 0.5, -Math.PI * 0.9, Math.PI * 0.55);
+    ctx.stroke();
+    const tip = { x: rh.x + Math.cos(Math.PI * 0.55) * rr * 0.5, y: rh.y + Math.sin(Math.PI * 0.55) * rr * 0.5 };
+    ctx.beginPath();
+    ctx.moveTo(tip.x - 3, tip.y - 1);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.lineTo(tip.x + 0.5, tip.y - 3.2);
+    ctx.stroke();
+    for (const side of ['left', 'right', 'front', 'back']) {
+      const q = sideHandle(f, side);
+      if (!q) continue;
+      const hs = coarse ? 7 : 4.5;
+      ctx.fillStyle = colors['--panel'];
+      ctx.strokeStyle = colors['--accent'];
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.rect(q.x - hs, q.y - hs, hs * 2, hs * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    // size in centimetres, and the angle while turning
+    const c = S(f);
+    const sizeTxt = `${fmtNum(f.w * 100, 0)} × ${fmtNum(f.d * 100, 0)}`;
+    if (mode === 'f-rotate') label(rh.x, rh.y - 22, `${fmtNum(f.rot, 0)}°`);
+    else if (Math.min(f.w, f.d) * view.s > 40) label(c.x, c.y, sizeTxt);
+    else label(c.x, Math.min(...poly.map((q) => S(q).y)) - 14, sizeTxt);
+    ctx.restore();
   }
 
   function drawRoomOutline(r) {
@@ -482,8 +685,48 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     }
   }
 
+  // A free spot for the room's name: a box of the label's size that fits between the
+  // walls and the furniture, as near the middle of the room as possible. Worked out on the
+  // saved plan (labels do not jump while a piece is dragged) and again when zooming.
+  function labelSpot(r, wm, hm) {
+    const base = state.project;
+    const key = `${view.s.toFixed(1)}`;
+    if (labelsOf !== base || labelMap.key !== key) {
+      labelsOf = base;
+      labelMap = new Map();
+      labelMap.key = key;
+    }
+    if (labelMap.has(r.id)) return labelMap.get(r.id);
+    const room = base.rooms.find((x) => x.id === r.id) || r;
+    let pt = G.labelPoint(room.points);
+    const polys = (base.furniture || []).filter((f) => f.roomId === r.id).map((f) => corners(f));
+    const boxAt = (q) => [
+      { x: q.x - wm / 2, y: q.y - hm / 2 }, { x: q.x + wm / 2, y: q.y - hm / 2 },
+      { x: q.x + wm / 2, y: q.y + hm / 2 }, { x: q.x - wm / 2, y: q.y + hm / 2 },
+    ];
+    const free = (q) => {
+      const box = boxAt(q);
+      return box.every((v) => G.pointInPolygon(v, room.points)) && !polys.some((poly) => overlapDepth(box, poly) > 0);
+    };
+    if (polys.length && !free(pt)) {
+      const b = G.bounds(room.points);
+      let best = null;
+      const n = 24;
+      for (let ix = 1; ix < n; ix++) {
+        for (let iy = 1; iy < n; iy++) {
+          const q = { x: b.minX + (b.w * ix) / n, y: b.minY + (b.h * iy) / n };
+          if (!free(q)) continue;
+          const dist = Math.hypot(q.x - pt.x, q.y - pt.y);
+          if (!best || dist < best.dist) best = { q, dist };
+        }
+      }
+      if (best) pt = best.q;
+    }
+    labelMap.set(r.id, pt);
+    return pt;
+  }
+
   function drawRoomLabel(r, p) {
-    const lp = S(G.labelPoint(r.points));
     const name = roomLabel(r, p.rooms);
     const areaTxt = `${fmtNum(G.area(r.points), 2)} მ²`;
     const b = G.bounds(r.points);
@@ -492,16 +735,26 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = `600 ${fs}px ${cssVar('--font-body')}`;
-    const showName = ctx.measureText(name).width < roomW - 8 && b.h * view.s > 34;
+    const nameW = ctx.measureText(name).width;
+    const showName = nameW < roomW - 8 && b.h * view.s > 34;
+    const lp = S(labelSpot(r, ((showName ? nameW : fs * 3) + 8) / view.s, (showName ? fs * 2.9 : fs * 1.5) / view.s));
     ctx.fillStyle = colors['--ink'];
+    // a halo in the paper colour keeps the label readable over furniture
+    ctx.strokeStyle = colors['--plan-bg'];
+    ctx.lineWidth = 3.5;
+    ctx.lineJoin = 'round';
+    const text = (t, x, y) => {
+      ctx.strokeText(t, x, y);
+      ctx.fillText(t, x, y);
+    };
     if (showName) {
-      ctx.fillText(name, lp.x, lp.y - fs * 0.7);
+      text(name, lp.x, lp.y - fs * 0.7);
       ctx.font = `500 ${fs - 0.5}px ${cssVar('--font-mono')}`;
       ctx.fillStyle = colors['--muted'];
-      ctx.fillText(areaTxt, lp.x, lp.y + fs * 0.75);
+      text(areaTxt, lp.x, lp.y + fs * 0.75);
     } else if (roomW > 36) {
       ctx.font = `500 ${fs - 1}px ${cssVar('--font-mono')}`;
-      ctx.fillText(fmtNum(G.area(r.points), 1), lp.x, lp.y);
+      text(fmtNum(G.area(r.points), 1), lp.x, lp.y);
     }
   }
 
@@ -799,8 +1052,41 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     if (!s) return;
     const p = current();
     if (s.type === 'room') commit(deleteRoom(p, s.id));
-    else commit(deleteOpening(p, s.id));
+    else if (s.type === 'furniture') {
+      const f = (p.furniture || []).find((x) => x.id === s.id);
+      commit(deleteFurniture(p, s.id));
+      if (f) toast(`${furnitureLabel(f)} წაიშალა. დაბრუნება — Ctrl+Z`, 'info');
+    } else commit(deleteOpening(p, s.id));
     setSelection(null);
+  }
+
+  function duplicateSelection() {
+    const f = selectedFurniture();
+    if (!f) return;
+    const r = duplicateFurniture(current(), f.id);
+    commit(r.project);
+    setSelection({ type: 'furniture', id: r.id });
+  }
+
+  function rotateSelection(deg) {
+    const f = selectedFurniture();
+    if (f) commit(rotateFurniture(current(), f.id, deg));
+  }
+
+  // Angle for a piece being turned: whole 15° steps, or exactly parallel to a wall of
+  // its room when within 5° of it.
+  function snapAngle(rot, room) {
+    if (room) {
+      for (const e of G.edges(room.points)) {
+        const base = wallRot(e, 'back');
+        for (let k = 0; k < 4; k++) {
+          const a = normRot(base + k * 90);
+          const diff = Math.abs(((rot - a + 540) % 360) - 180);
+          if (diff < 5) return a;
+        }
+      }
+    }
+    return normRot(Math.round(rot / 15) * 15);
   }
 
   function applyScale(meters) {
@@ -838,7 +1124,10 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), m: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
-      if (mode && mode.startsWith('drag')) cancelPreview();
+      if (editing(mode)) {
+        cancelPreview();
+        wallGuides = [];
+      }
       // The first finger of a pinch must not leave a half-started rectangle behind,
       // otherwise the next tap would create a room by accident.
       if (mode === 'rect-drag') {
@@ -863,7 +1152,20 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
         mode = 'pan';
         return;
       }
-      if (hit.kind === 'vertex') {
+      if (hit.kind === 'f-rotate' || hit.kind === 'f-resize' || hit.kind === 'furniture') {
+        // Furniture moves straight away, with mouse and finger alike: it is small, and a
+        // swipe that starts on empty floor (or two fingers) still pans the plan.
+        setSelection({ type: 'furniture', id: hit.f.id });
+        drag.f = hit.f;
+        if (hit.kind === 'f-rotate') {
+          mode = 'f-rotate';
+          drag.a0 = Math.atan2(pos.y - sy(hit.f.y), pos.x - sx(hit.f.x));
+          drag.moved = true;
+        } else if (hit.kind === 'f-resize') {
+          mode = 'f-resize';
+          drag.side = hit.side;
+        } else mode = 'f-move';
+      } else if (hit.kind === 'vertex') {
         mode = 'drag-vertex';
         drag.room = hit.room;
         drag.i = hit.i;
@@ -939,7 +1241,18 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
       return;
     }
     const p = state.project;
-    // The dragged room or opening can disappear mid-drag (undo shortcut, another tab).
+    // The dragged room, opening or piece can disappear mid-drag (undo shortcut, another tab).
+    if (mode && mode.startsWith('f-')) {
+      const f0 = (p.furniture || []).find((x) => x.id === drag.f.id);
+      if (!f0) {
+        mode = null;
+        wallGuides = [];
+        cancelPreview();
+        return;
+      }
+      if (drag.moved) dragFurniture(p, f0, w, pos, e);
+      return;
+    }
     if (mode && mode.startsWith('drag') && (!p.rooms.some((x) => x.id === drag.room?.id)
       || (mode === 'drag-opening' && !p.openings.some((o) => o.id === drag.op?.id)))) {
       mode = null;
@@ -1029,14 +1342,21 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     // hover feedback
     if (state.tool === 'select' && !mode) {
       const hit = hitTest(pos.x, pos.y);
-      const key = hit ? `${hit.kind}:${hit.room?.id}:${hit.i}:${hit.op?.id}` : '';
-      const prevKey = hover ? `${hover.kind}:${hover.room?.id}:${hover.i}:${hover.op?.id}` : '';
+      const key = hit ? `${hit.kind}:${hit.room?.id}:${hit.i}:${hit.op?.id}:${hit.f?.id}:${hit.side}` : '';
+      const prevKey = hover ? `${hover.kind}:${hover.room?.id}:${hover.i}:${hover.op?.id}:${hover.f?.id}:${hover.side}` : '';
       hover = hit;
+      let resizeCursor = 'move';
+      if (hit?.kind === 'f-resize') {
+        const si = sideInfo(hit.f, hit.side);
+        resizeCursor = Math.abs(si.nx) > Math.abs(si.ny) ? 'ew-resize' : 'ns-resize';
+      }
       canvas.style.cursor = !hit ? 'grab'
         : hit.kind === 'vertex' ? 'move'
           : hit.kind === 'edge' ? (Math.abs(G.edge(hit.room.points, hit.i).ux) < 0.5 ? 'ew-resize' : 'ns-resize')
-            : hit.kind === 'opening' ? 'pointer'
-              : 'pointer';
+            : hit.kind === 'furniture' ? 'move'
+              : hit.kind === 'f-rotate' ? 'grab'
+                : hit.kind === 'f-resize' ? resizeCursor
+                  : 'pointer';
       if (key !== prevKey) draw();
       return;
     }
@@ -1074,6 +1394,79 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     }
   }
 
+  // Move, turn or resize the piece being dragged. Snapping to walls and to the 10 cm grid
+  // follows the switches in the hint bar; holding Alt turns snapping off for the moment.
+  function dragFurniture(p, f0, w, pos, e) {
+    const f = drag.f; // the piece as it was when the drag started
+    const free = e.altKey;
+    const tol = Math.max(0.04, Math.min(0.35, (coarse ? 22 : 14) / view.s));
+    wallGuides = [];
+    if (mode === 'f-move') {
+      const step = state.snap.grid && !free ? 0.1 : 0.01;
+      let x = G.round(f.x + (w.x - drag.startWorld.x), step);
+      let y = G.round(f.y + (w.y - drag.startWorld.y), step);
+      let rot = f0.rot;
+      if (state.snap.walls && !free) {
+        const room = roomAt(p.rooms, { x, y }) || p.rooms.find((r) => r.id === f0.roomId);
+        const sn = snapToWalls({ ...f0, x, y }, room, tol);
+        x = sn.x;
+        y = sn.y;
+        rot = sn.rot;
+        wallGuides = sn.edges.map((i) => G.edge(room.points, i));
+      }
+      preview(updateFurniture(p, f0.id, { x, y, rot }));
+      return;
+    }
+    if (mode === 'f-rotate') {
+      const a = Math.atan2(pos.y - sy(f.y), pos.x - sx(f.x));
+      let rot = f.rot + (a - drag.a0) / DEG;
+      rot = free || e.shiftKey ? normRot(Math.round(rot)) : snapAngle(rot, p.rooms.find((r) => r.id === f0.roomId));
+      preview(updateFurniture(p, f0.id, { rot }));
+      return;
+    }
+    if (mode === 'f-resize') {
+      const side = drag.side;
+      const l = fLocal(f, w);
+      const step = state.snap.grid && !free ? 0.05 : 0.01;
+      const min = 0.2;
+      let W = f.w;
+      let D = f.d;
+      let cx = 0;
+      let cy = 0;
+      if (side === 'right' || side === 'left') {
+        const ext = side === 'right' ? l.x + f.w / 2 : f.w / 2 - l.x;
+        W = Math.max(min, G.round(ext, step));
+        cx = ((W - f.w) / 2) * (side === 'right' ? 1 : -1);
+      } else {
+        const ext = side === 'front' ? l.y + f.d / 2 : f.d / 2 - l.y;
+        D = Math.max(min, G.round(ext, step));
+        cy = ((D - f.d) / 2) * (side === 'front' ? 1 : -1);
+      }
+      const c = fWorld(f, cx, cy);
+      let next = { ...f, x: c.x, y: c.y, w: W, d: D };
+      if (state.snap.walls && !free) {
+        // the side being dragged stops on a wall it reaches
+        const room = p.rooms.find((r) => r.id === f0.roomId);
+        for (const edg of room ? G.edges(room.points) : []) {
+          const r = sideToWall(next, side, edg);
+          if (r.facing < 0.996 || Math.abs(r.dist) > tol || r.t1 < 0.02 || r.t0 > edg.len - 0.02) continue;
+          const si = sideInfo(next, side);
+          const grow = r.dist;
+          next = {
+            ...next,
+            w: side === 'left' || side === 'right' ? next.w + grow : next.w,
+            d: side === 'front' || side === 'back' ? next.d + grow : next.d,
+            x: next.x + si.nx * grow / 2,
+            y: next.y + si.ny * grow / 2,
+          };
+          wallGuides = [edg];
+          break;
+        }
+      }
+      preview(updateFurniture(p, f0.id, { x: next.x, y: next.y, w: next.w, d: next.d }));
+    }
+  }
+
   function orthoFrom(a, w) {
     return Math.abs(w.x - a.x) > Math.abs(w.y - a.y) ? { x: w.x, y: a.y } : { x: a.x, y: w.y };
   }
@@ -1093,7 +1486,8 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     const m = mode;
     mode = null;
     guides = [];
-    if (m && m.startsWith('drag')) {
+    wallGuides = [];
+    if (editing(m)) {
       if (state.draft) commit(state.draft);
       draw();
       return;
@@ -1201,9 +1595,16 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
       closePoly();
       return;
     }
+    if (mod && e.key.toLowerCase() === 'd' && state.selection?.type === 'furniture') {
+      // also right after a button in the panel was used; not the browser's bookmark shortcut
+      e.preventDefault();
+      duplicateSelection();
+      return;
+    }
     if (onPlan && e.key.startsWith('Arrow') && state.tool === 'select' && state.selection && !mod) {
-      // Keyboard editing: arrows move the selected room by 1 cm (Shift: 10 cm), or slide the
-      // selected door/window along its wall. A burst of presses is one undo step.
+      // Keyboard editing: arrows move the selected room or piece of furniture by 1 cm
+      // (Shift: 10 cm), or slide the selected door/window along its wall. A burst of
+      // presses is one undo step.
       e.preventDefault();
       const step = e.shiftKey ? 0.1 : 0.01;
       const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
@@ -1212,6 +1613,7 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
       const sel = state.selection;
       let next = null;
       if (sel.type === 'room') next = moveRoom(p, sel.id, dx, dy);
+      else if (sel.type === 'furniture') next = moveFurniture(p, sel.id, dx, dy);
       else {
         const op = p.openings.find((o) => o.id === sel.id);
         if (op) next = updateOpening(p, op.id, { offset: op.offset + (dx || dy) });
@@ -1244,6 +1646,10 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
       }
       return;
     }
+    if (e.key.toLowerCase() === 'f' && !mod && !e.altKey) {
+      onOpenLibrary?.();
+      return;
+    }
     const shortcuts = { v: 'select', r: 'rect', p: 'poly', d: 'door', w: 'window' };
     const t = shortcuts[e.key.toLowerCase()];
     if (t && !mod) setTool(t);
@@ -1259,7 +1665,7 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     const tool = state.tool;
     const sel = state.selection;
     const p = current();
-    const key = [tool, coarse, polyPts.length > 0, polyPts.length >= 3, !!rectStart, scalePts.length, sel?.type, !!p.plan?.calibrated, p.rooms.length > 0].join('|');
+    const key = [tool, coarse, polyPts.length > 0, polyPts.length >= 3, !!rectStart, scalePts.length, sel?.type, !!p.plan?.calibrated, p.rooms.length > 0, state.snap.walls, state.snap.grid].join('|');
     if (key === hintKey && !force) return;
     hintKey = key;
     clear(hintEl);
@@ -1270,8 +1676,22 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
         ? 'გადაათრიე კედელი ან კუთხე. ოთახის გადასატანად დააჭირე და გააჩერე თითი. ზუსტი სიგრძე — პარამეტრებში.'
         : 'გადაათრიე კედელი ან კუთხე. ზუსტ სიგრძეს პარამეტრების პანელში ჩაწერ. ხელახლა გადათრევით ოთახი გადაადგილდება.'));
       else if (sel?.type === 'opening') add(hintEl, text('გადაათრიე კედლის გასწვრივ. ტიპი და ზომები მარჯვნივ.'));
+      else if (sel?.type === 'furniture') {
+        const toggle = (id, label, key) => h('label', { class: 'check' },
+          h('input', { type: 'checkbox', id, checked: state.snap[key], onchange: (ev) => setSnap({ [key]: ev.target.checked }) }), ` ${label}`);
+        // On phones the same switches and buttons are in the bottom sheet, so the bar
+        // keeps to one line there and leaves the plan its height.
+        add(hintEl,
+          text(coarse ? 'გადაათრიე ნივთი. მრგვალი სახელური აბრუნებს, კვადრატები ზომას ცვლის.'
+            : 'გადაათრიე; მრგვალი სახელური აბრუნებს, გვერდის კვადრატები ზომას ცვლის. Alt — მიკვრის გარეშე.'),
+          h('span', { class: 'hint-extra' },
+            toggle('snap-walls', 'კედლებზე მიკვრა', 'walls'),
+            toggle('snap-grid', 'ბადე 10 სმ', 'grid'),
+            h('button', { type: 'button', class: 'btn btn-sm', 'aria-label': 'მობრუნება 90°-ით', onclick: () => rotateSelection(90) }, icon('rotate', 16), '90°'),
+            h('button', { type: 'button', class: 'btn btn-sm', onclick: duplicateSelection }, icon('copy', 16), 'ასლი')));
+      }
       else if (!p.rooms.length) add(hintEl, text('დაიწყე ოთახით: აირჩიე „მართკუთხა ოთახი“ ან „რთული ფორმა“ და შემოხაზე პირველი ოთახი.'));
-      else add(hintEl, text('აირჩიე ოთახი, კარი ან ფანჯარა. ბორბლით ან ორი თითით ზომას ცვლი, გადათრევით გადაადგილდები.'));
+      else add(hintEl, text('აირჩიე ოთახი, ავეჯი, კარი ან ფანჯარა. ბორბლით ან ორი თითით ზომას ცვლი, გადათრევით გადაადგილდები.'));
     } else if (tool === 'rect') {
       if (!rectStart) add(hintEl, text('დააჭირე ოთახის ერთ კუთხეს და გადაათრიე საპირისპირო კუთხემდე.'));
       else {
@@ -1360,7 +1780,7 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
   canvas.addEventListener('pointerdown', onPointerDown);
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerup', onPointerUp);
-  canvas.addEventListener('pointercancel', (e) => { clearTimeout(holdTimer); pointers.delete(e.pointerId); mode = null; cancelPreview(); });
+  canvas.addEventListener('pointercancel', (e) => { clearTimeout(holdTimer); pointers.delete(e.pointerId); mode = null; wallGuides = []; cancelPreview(); });
   canvas.addEventListener('pointerleave', () => { if (!mode) { cursor = null; cursorScreen = null; placing = null; hover = null; draw(); } });
   canvas.addEventListener('wheel', onWheel, { passive: false });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -1381,7 +1801,7 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
       guides = [];
       canvas.style.cursor = state.tool === 'select' ? 'default' : 'crosshair';
     }
-    if (['project', 'draft', 'selection', 'tool', 'image', 'hover', 'theme', 'opacity'].includes(kind)) {
+    if (['project', 'draft', 'selection', 'tool', 'image', 'hover', 'theme', 'opacity', 'snap'].includes(kind)) {
       if (kind !== 'draft' && kind !== 'hover' && kind !== 'opacity') renderHint();
       draw();
     }
@@ -1399,7 +1819,11 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
       renderHint(true);
     },
     deleteSelection,
+    duplicateSelection,
+    rotateSelection,
     toScreen: (p) => S(p),
+    // The middle of the visible plan, in metres.
+    viewCenter: () => toWorld(W / 2, H / 2),
     // Pan (never zoom) so the given world points sit inside the part of the plan that is
     // not covered by a bottom sheet of `coverPx` screen pixels.
     reveal(points, coverPx = 0) {

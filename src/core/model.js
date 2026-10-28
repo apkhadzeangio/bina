@@ -1,8 +1,15 @@
 // Project data model: room purposes, opening types, defaults and the sample apartment.
 import { area, edge, normalizeOrientation, rectPoints, roundPoint } from './geometry.js';
 import { STYLES, TIERS } from './catalog.js';
+import { newId } from './ids.js';
+import { makeFurniture, runFurniture, cleanFurniture } from './furniture.js';
 
-export const SCHEMA_VERSION = 1;
+export { newId };
+
+// Saved project format.
+//   1  rooms, openings, finishes; kitchen cabinets as stretches of kitchen walls (room.kitchen.runs)
+//   2  furniture list; kitchen cabinet runs are furniture of type kitchen_run
+export const SCHEMA_VERSION = 2;
 
 // Room purposes. `surfaces` maps each finish surface to the material category used by default.
 export const PURPOSES = {
@@ -86,12 +93,6 @@ export const OPENING_TYPES = {
 
 export const DEFAULT_HEIGHT = 2.8;
 
-let idCounter = 0;
-export function newId(prefix) {
-  idCounter += 1;
-  return `${prefix}${Date.now().toString(36)}${idCounter.toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
-}
-
 export function roomLabel(room, rooms) {
   if (room.name) return room.name;
   const p = PURPOSES[room.purpose] || PURPOSES.other;
@@ -108,7 +109,6 @@ export function makeRoom(points, purpose = 'other', extra = {}) {
     points: normalizeOrientation(points.map((p) => roundPoint(p))),
     height: null,
     tileHeight: null,
-    kitchen: null,
     ...extra,
   };
 }
@@ -135,6 +135,7 @@ export function emptyProject() {
     height: DEFAULT_HEIGHT,
     rooms: [],
     openings: [],
+    furniture: [], // see furniture.js
     plan: null, // { hasImage, x, y, mPerPx, w, h, opacity, visible }
     style: 'modern',
     tier: 'mid',
@@ -168,7 +169,6 @@ export function sampleProject() {
   p.rooms = [living, bedroom, kids, hall, bath, wc, balcony];
 
   // Edge indices for rectangles: 0 top, 1 right, 2 bottom, 3 left (clockwise on screen).
-  living.kitchen = { runs: [{ edge: 1, start: 0, length: 3.6 }] };
   const O = (room, edgeIndex, offset, type, over = {}) => ({ ...makeOpening(room.id, edgeIndex, offset, type), ...over });
   p.openings = [
     // living-kitchen: window and balcony door on the top wall, window on the left wall
@@ -189,6 +189,41 @@ export function sampleProject() {
     // entrance door on the hall bottom wall (hall bottom edge runs right→left from x=7.5)
     O(hall, 4, 0.85, 'entrance'),
   ];
+
+  // Furniture. rot is clockwise from "back to the top wall": 90 = back to the right wall,
+  // 180 = back to the bottom wall, 270 = back to the left wall.
+  const F = (room, type, x, y, rot, over) => makeFurniture(type, x, y, rot, { roomId: room.id, ...over });
+  p.furniture = [
+    // kitchen along the right wall of the living-kitchen, dining table, sofa facing the TV
+    runFurniture(living, { edge: 1, start: 0, length: 3.6 }),
+    F(living, 'sink', 5.7, 1.2, 90),
+    F(living, 'stove', 5.7, 2.6, 90),
+    F(living, 'fridge', 5.675, 3.92, 90),
+    F(living, 'dining_table', 3.5, 1.9, 90),
+    F(living, 'chair', 2.78, 1.5, 270),
+    F(living, 'chair', 2.78, 2.3, 270),
+    F(living, 'chair', 4.22, 1.5, 90),
+    F(living, 'chair', 4.22, 2.3, 90),
+    F(living, 'sofa', 1.25, 2.2, 0),
+    F(living, 'coffee_table', 1.25, 3.3, 0),
+    F(living, 'tv_unit', 1.25, 4.39, 180),
+    // bedroom: 160 × 200 bed with its head to the right wall, wardrobe on the left wall
+    F(bedroom, 'bed_double', 9.0, 1.8, 90),
+    F(bedroom, 'bedside', 9.8, 0.745, 90),
+    F(bedroom, 'bedside', 9.8, 2.855, 90),
+    F(bedroom, 'wardrobe', 6.5, 1.2, 270),
+    // kids: bed along the bottom wall, desk under the top wall, wardrobe by the door
+    F(kids, 'bed_single', 9.4, 6.75, 90),
+    F(kids, 'desk', 9.7, 4.02, 0),
+    F(kids, 'chair', 9.7, 4.47, 180),
+    F(kids, 'wardrobe', 7.92, 4.42, 270, { w: 1.2 }),
+    // hall wardrobe, bathroom and WC fixtures
+    F(hall, 'wardrobe', 5.1, 6.0, 180, { w: 1.4 }),
+    F(bath, 'bathtub', 0.86, 5.095, 0),
+    F(bath, 'toilet', 0.325, 6.4, 270),
+    F(bath, 'vanity', 1.7, 6.65, 180),
+    F(wc, 'toilet', 3.35, 7.575, 180),
+  ];
   return p;
 }
 
@@ -201,6 +236,7 @@ export const LIMITS = {
   maxHeight: 10,
   maxRooms: 500,
   maxOpenings: 2000,
+  maxFurniture: 2000,
   maxName: 200,
 };
 
@@ -260,11 +296,13 @@ function cleanPlan(pl) {
 // Bring older, partial or hand-edited project JSON up to the current shape. Every value is
 // checked, because saved data comes from the browser or from files people send each other:
 // a single bad number must not crash the drawing or turn the estimate into NaN. Items that
-// cannot be repaired are dropped and counted in `report` ({ rooms, openings }).
-// Returns null when the input is not a project at all.
+// cannot be repaired are dropped and counted in `report` ({ rooms, openings, furniture }).
+// Older versions are converted (see SCHEMA_VERSION). Returns null when the input is not a
+// project at all.
 export function migrateProject(raw, report = {}) {
   report.rooms = 0;
   report.openings = 0;
+  report.furniture = 0;
   // Every project this program writes has a rooms list; anything else is some other file.
   if (!isObj(raw) || !Array.isArray(raw.rooms)) return null;
   const base = emptyProject();
@@ -279,6 +317,7 @@ export function migrateProject(raw, report = {}) {
   };
 
   const ids = new Set();
+  const kitchens = []; // version 1 kitchen cabinets, converted to furniture below
   for (const r of raw.rooms) {
     const points = isObj(r) ? cleanPoints(r.points) : null;
     if (!points || p.rooms.length >= LIMITS.maxRooms) {
@@ -290,16 +329,17 @@ export function migrateProject(raw, report = {}) {
     ids.add(id);
     const height = cleanHeight(r.height);
     const tileHeight = finite(r.tileHeight) && num(r.tileHeight) > 0 ? num(r.tileHeight) : null;
-    p.rooms.push({
+    const room = {
       id,
       purpose: typeof r.purpose === 'string' && PURPOSES[r.purpose] ? r.purpose : 'other',
       name: str(r.name),
       points,
       height,
       tileHeight,
-      kitchen: cleanKitchen(r.kitchen, points.length),
       unassigned: !!r.unassigned,
-    });
+    };
+    p.rooms.push(room);
+    if (r.kitchen !== undefined && r.kitchen !== null) kitchens.push({ room, kitchen: r.kitchen });
     // A duplicated room id gets a new id; its openings cannot be told apart from the
     // first room's, so they stay with the first room.
   }
@@ -331,6 +371,20 @@ export function migrateProject(raw, report = {}) {
       height: finite(o.height) && num(o.height) > 0.3 && num(o.height) <= LIMITS.maxHeight ? num(o.height) : t.height,
       sill: finite(o.sill) && num(o.sill) >= 0 && num(o.sill) <= LIMITS.maxHeight ? num(o.sill) : t.sill,
     });
+  }
+
+  p.furniture = cleanFurniture(raw.furniture, p.rooms, report, LIMITS.maxFurniture);
+  // Version 1: kitchen cabinets were stretches of kitchen walls. Only kitchens used them.
+  if (!(num(raw.version) >= 2)) {
+    for (const { room, kitchen } of kitchens) {
+      if (!PURPOSES[room.purpose].kitchen) continue;
+      for (const run of cleanKitchen(kitchen, room.points.length)?.runs || []) {
+        const len = edge(room.points, run.edge).len;
+        const start = Math.min(len, run.start);
+        const length = Math.min(run.length, len - start);
+        if (length > 0.05 && p.furniture.length < LIMITS.maxFurniture) p.furniture.push(runFurniture(room, { edge: run.edge, start, length }));
+      }
+    }
   }
 
   const finish = isObj(raw.finish) ? raw.finish : {};

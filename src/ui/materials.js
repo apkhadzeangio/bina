@@ -16,7 +16,13 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
   const viewBox = h('div', { class: 'view-box', id: 'view3d' });
   const viewMsg = h('div', { class: 'view-msg' }, '3D ხედი იტვირთება…');
   const cutBtn = h('button', { type: 'button', class: 'btn btn-sm btn-float', 'aria-pressed': 'false' }, icon('layers', 16), 'კედლების ჭრილი');
-  const fitBtn = h('button', { type: 'button', class: 'btn btn-sm btn-float' }, icon('fit', 16), 'მთელი ბინა');
+  // Viewpoints: the whole apartment at an angle, straight from above (like the plan), or
+  // standing inside one room at eye height — the view an interior render starts from.
+  const VIEWS = [['overview', 'მთელი ბინა'], ['top', 'ზემოდან'], ['room', 'ოთახში']];
+  const viewSeg = h('div', { class: 'seg seg-float', role: 'radiogroup', 'aria-label': 'ხედი' }, VIEWS.map(([k, label]) => h('button', {
+    type: 'button', class: 'seg-btn', 'data-view': k, role: 'radio', 'aria-checked': 'false', onclick: () => chooseView(k),
+  }, label)));
+  const cornerBtn = h('button', { type: 'button', class: 'btn btn-sm btn-float', hidden: true, onclick: () => { view?.nextCorner(); } }, icon('rotate', 16), 'სხვა კუთხე');
   const viewCaption = h('div', { class: 'view-caption' });
   const panel = h('div', { class: 'mat-panel' });
   const totalBar = h('div', { class: 'total-bar' });
@@ -24,7 +30,7 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
   add(el, 
     h('div', { class: 'mat-layout' },
       h('div', { class: 'view-col' },
-        h('div', { class: 'view-wrap' }, viewBox, viewMsg, h('div', { class: 'view-tools' }, fitBtn, cutBtn)),
+        h('div', { class: 'view-wrap' }, viewBox, viewMsg, h('div', { class: 'view-tools' }, viewSeg, cutBtn, cornerBtn)),
         viewCaption),
       h('div', { class: 'mat-col' }, panel, totalBar)),
     dialog,
@@ -58,8 +64,10 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
         THREE,
         container: viewBox,
         onPickRoom: (id) => {
+          if (!id && view.view.kind === 'room') return; // looking around inside a room
           focusRoom = id;
           view.focusRoom(id);
+          syncView();
           renderCaption();
           if (id) {
             const sec = panel.querySelector(`[data-room="${id}"]`);
@@ -84,22 +92,45 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
   cutBtn.addEventListener('click', () => {
     if (!view) return;
     view.setCut(!view.cut);
-    cutBtn.setAttribute('aria-pressed', String(view.cut));
-    cutBtn.classList.toggle('on', view.cut);
-  });
-  fitBtn.addEventListener('click', () => {
-    focusRoom = null;
-    view?.focusRoom(null);
+    syncView();
     renderCaption();
-    panel.querySelectorAll('.room-sec').forEach((s) => s.classList.remove('focus'));
   });
+
+  function markFocus() {
+    panel.querySelectorAll('.room-sec').forEach((s) => s.classList.toggle('focus', !!focusRoom && s.dataset.room === focusRoom));
+  }
+
+  function chooseView(kind) {
+    if (!view) return;
+    if (kind === 'overview') focusRoom = null;
+    view.setView(kind, { roomId: focusRoom });
+    if (kind === 'room') focusRoom = view.view.roomId;
+    if (kind === 'overview') view.focusRoom(null);
+    markFocus();
+    syncView();
+    renderCaption();
+  }
+
+  function syncView() {
+    const kind = view?.view.kind || 'overview';
+    for (const b of viewSeg.querySelectorAll('.seg-btn')) {
+      const on = b.dataset.view === kind;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+    }
+    cornerBtn.hidden = kind !== 'room';
+    const cut = !!view?.cut;
+    cutBtn.setAttribute('aria-pressed', String(cut));
+    cutBtn.classList.toggle('on', cut);
+  }
 
   function renderCaption() {
     clear(viewCaption);
     const p = current();
     const r = focusRoom && p.rooms.find((x) => x.id === focusRoom);
+    const inRoom = view?.view.kind === 'room';
     add(viewCaption, r
-      ? h('span', null, h('b', null, roomLabel(r, p.rooms)), ` · ${fmtArea(G.area(r.points))}`)
+      ? h('span', null, h('b', null, roomLabel(r, p.rooms)), inRoom ? ' · შიგნიდან, თვალის სიმაღლიდან. გადათრევით მიმოიხედე, „სხვა კუთხე“ — სხვა წერტილიდან.' : ` · ${fmtArea(G.area(r.points))}`)
       : h('span', { class: 'muted' }, 'დააჭირე ოთახს 3D-ში, რომ მასზე გადახვიდე. გადათრევით ატრიალებ, ბორბლით ან ორი თითით ადიდებ.'));
   }
 
@@ -201,7 +232,7 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
         h('button', {
           type: 'button',
           class: 'room-h as-btn',
-          onclick: () => { focusRoom = room.id; view?.focusRoom(room.id); renderCaption(); panel.querySelectorAll('.room-sec').forEach((s) => s.classList.toggle('focus', s.dataset.room === room.id)); },
+          onclick: () => { focusRoom = room.id; view?.focusRoom(room.id); syncView(); renderCaption(); markFocus(); },
         },
         h('span', { class: 'dot', style: { background: `var(${purposeColorVar(room.purpose)})` } }),
         roomLabel(room, p.rooms),
@@ -315,6 +346,7 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
           view.resize();
           view.update(current(), { refit: needsRefit });
           needsRefit = false;
+          syncView();
         }
       });
     },

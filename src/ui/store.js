@@ -1,14 +1,28 @@
 // App state, undo history and local saving.
 import { sampleProject, migrateProject, cleanPlanImage } from '../core/model.js';
 
+// The storage key keeps its v1 name: the project inside carries its own schema version
+// and is migrated on load, so older saves open without any extra step.
 const KEY = 'bina-designer:project:v1';
 const IMG_KEY = 'bina-designer:plan-image:v1';
 const BACKUP_KEY = 'bina-designer:project:unreadable-backup';
+const SNAP_KEY = 'bina-designer:snap:v1';
+
+function loadSnap() {
+  const def = { walls: true, grid: false };
+  try {
+    const v = JSON.parse(localStorage.getItem(SNAP_KEY) || 'null');
+    return v && typeof v === 'object' ? { walls: v.walls !== false, grid: v.grid === true } : def;
+  } catch (e) {
+    return def;
+  }
+}
 
 export const state = {
   project: null,
   draft: null, // temporary project while dragging; not in history
-  selection: null, // { type: 'room' | 'opening', id }
+  selection: null, // { type: 'room' | 'opening' | 'furniture', id }
+  snap: loadSnap(), // furniture snapping, a per-browser preference: { walls, grid }
   hoverEdge: null, // { roomId, edge } highlighted from the inspector
   tool: 'select',
   step: 'plan',
@@ -93,8 +107,16 @@ function validateSelection() {
   const s = state.selection;
   if (!s) return;
   const p = state.project;
-  const ok = s.type === 'room' ? p.rooms.some((r) => r.id === s.id) : p.openings.some((o) => o.id === s.id);
-  if (!ok) state.selection = null;
+  const list = s.type === 'room' ? p.rooms : s.type === 'furniture' ? p.furniture || [] : p.openings;
+  if (!list.some((x) => x.id === s.id)) state.selection = null;
+}
+
+export function setSnap(patch) {
+  state.snap = { ...state.snap, ...patch };
+  try {
+    localStorage.setItem(SNAP_KEY, JSON.stringify(state.snap));
+  } catch (e) { /* the preference just is not remembered */ }
+  emit('snap');
 }
 
 export function setSelection(sel) {
@@ -176,7 +198,7 @@ export function loadSaved() {
         localStorage.setItem(BACKUP_KEY, raw);
       } catch (e) { /* nothing more can be done */ }
       notice = 'შენახული პროექტი დაზიანებულია და ვერ გაიხსნა. ნაჩვენებია ნიმუში; ძველი მონაცემები ბრაუზერში სარეზერვოდ შენახულია.';
-    } else if (report.rooms || report.openings) {
+    } else if (report.rooms || report.openings || report.furniture) {
       notice = droppedNotice(report);
     }
   }
@@ -187,6 +209,7 @@ export function droppedNotice(report) {
   const parts = [];
   if (report.rooms) parts.push(`${report.rooms} ოთახი`);
   if (report.openings) parts.push(`${report.openings} კარი/ფანჯარა`);
+  if (report.furniture) parts.push(`${report.furniture} ავეჯი`);
   return parts.length ? `არასწორი მონაცემის გამო გამოტოვებულია: ${parts.join(', ')}.` : null;
 }
 

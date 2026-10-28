@@ -108,7 +108,8 @@ test('invalid heights fall back to defaults instead of producing NaN totals', ()
 test('broken kitchen data does not throw', () => {
   for (const kitchen of [{ runs: 'x' }, { runs: [{ edge: 'a', start: 'b', length: 'c' }] }, 5, { runs: [{ edge: 9, length: 2 }] }]) {
     const p = migrateProject({ rooms: [room({ purpose: 'kitchen', kitchen })] });
-    assert.ok(p.rooms[0].kitchen === null || Array.isArray(p.rooms[0].kitchen.runs));
+    assert.equal(p.rooms[0].kitchen, undefined); // version 2 keeps kitchen cabinets as furniture
+    assert.deepEqual(p.furniture, []);
     assertUsable(p);
   }
 });
