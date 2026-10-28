@@ -40,6 +40,10 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
   let spaceDown = false;
   const pointers = new Map();
   let pinch = null;
+  // Fingers are less precise than a mouse: hit areas and handles grow for touch and pen.
+  let coarse = window.matchMedia?.('(pointer: coarse)').matches || false;
+  let holdTimer = null; // long-press before a selected room can be moved by touch
+  let nudge = null; // last arrow-key move, to merge a burst into one undo step
   let fittedOnce = false;
 
   // ---------------------------------------------------------------- coordinates
@@ -205,7 +209,7 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     if (sel) {
       for (let i = 0; i < sel.points.length; i++) {
         const q = S(sel.points[i]);
-        if (Math.hypot(q.x - px, q.y - py) < 9) return { kind: 'vertex', room: sel, i };
+        if (Math.hypot(q.x - px, q.y - py) < (coarse ? 20 : 9)) return { kind: 'vertex', room: sel, i };
       }
     }
     // openings (any room)
@@ -214,14 +218,16 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
       if (!room) continue;
       const seg = openingSegment(room, op);
       const r = G.projectOnSegment({ x: px, y: py }, S(seg.p0), S(seg.p1));
-      if (r.d < 8) return { kind: 'opening', op, room };
+      if (r.d < (coarse ? 14 : 8)) return { kind: 'opening', op, room };
     }
     if (sel) {
       for (let i = 0; i < sel.points.length; i++) {
         const a = S(sel.points[i]);
         const b = S(sel.points[(i + 1) % sel.points.length]);
         const r = G.projectOnSegment({ x: px, y: py }, a, b);
-        if (r.d < 7 && r.t > 8 && r.t < r.len - 8) return { kind: 'edge', room: sel, i };
+        const tol = coarse ? 16 : 7;
+        const end = coarse ? 18 : 8;
+        if (r.d < tol && r.t > end && r.t < r.len - end) return { kind: 'edge', room: sel, i };
       }
     }
     let best = null;
@@ -243,7 +249,7 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
         const a = S(r.points[i]);
         const b = S(r.points[(i + 1) % r.points.length]);
         const q = G.projectOnSegment({ x: px, y: py }, a, b);
-        if (q.d < 16 && (!best || q.d < best.d)) best = { room: r, i, d: q.d, t: q.t / view.s };
+        if (q.d < (coarse ? 28 : 16) && (!best || q.d < best.d)) best = { room: r, i, d: q.d, t: q.t / view.s };
       }
     }
     return best;
@@ -556,9 +562,31 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
       ctx.strokeStyle = colors['--accent'];
       ctx.lineWidth = 1.6;
       ctx.beginPath();
-      ctx.rect(q.x - 4.5, q.y - 4.5, 9, 9);
+      const hs = coarse ? 7 : 4.5;
+      ctx.rect(q.x - hs, q.y - hs, hs * 2, hs * 2);
       ctx.fill();
       ctx.stroke();
+    }
+    if (coarse) {
+      // Touch has no hover, so show a grip in the middle of every wall that can be dragged.
+      for (const e of es) {
+        const A = S(e.a);
+        const B = S(e.b);
+        if (Math.hypot(B.x - A.x, B.y - A.y) < 48) continue;
+        const mx = (A.x + B.x) / 2;
+        const my = (A.y + B.y) / 2;
+        ctx.save();
+        ctx.translate(mx, my);
+        ctx.rotate(Math.atan2(B.y - A.y, B.x - A.x));
+        ctx.fillStyle = colors['--panel'];
+        ctx.strokeStyle = colors['--accent'];
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.roundRect ? ctx.roundRect(-11, -4.5, 22, 9, 4.5) : ctx.rect(-11, -4.5, 22, 9);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
     }
     if (hover && hover.kind === 'edge' && hover.room.id === r.id) {
       const e = es[hover.i];
@@ -797,6 +825,13 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
   // ---------------------------------------------------------------- pointer handling
   function onPointerDown(e) {
     canvas.focus({ preventScroll: true });
+    const wasCoarse = coarse;
+    coarse = e.pointerType === 'touch' || e.pointerType === 'pen';
+    if (coarse !== wasCoarse) {
+      renderHint();
+      draw();
+    }
+    clearTimeout(holdTimer);
     const pos = eventPos(e);
     pointers.set(e.pointerId, pos);
     canvas.setPointerCapture(e.pointerId);
@@ -844,8 +879,23 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
       } else if (hit.kind === 'room') {
         const already = state.selection?.type === 'room' && state.selection.id === hit.room.id;
         setSelection({ type: 'room', id: hit.room.id });
-        mode = already ? 'drag-room' : 'pan-or-click';
         drag.room = hit.room;
+        if (already && coarse) {
+          // A selected room covers much of a phone screen; a plain swipe pans the view and
+          // only a press-and-hold picks the room up, so it is not moved by accident.
+          mode = 'pan-or-click';
+          holdTimer = setTimeout(() => {
+            if (mode === 'pan-or-click' && drag && !drag.moved && pointers.size === 1) {
+              mode = 'drag-room';
+              drag.moved = true;
+              drag.startWorld = toWorld(cursorScreen?.x ?? pos.x, cursorScreen?.y ?? pos.y);
+              navigator.vibrate?.(12);
+              toast('ახლა გადაათრიე ოთახი.', 'info');
+            }
+          }, 420);
+        } else {
+          mode = already ? 'drag-room' : 'pan-or-click';
+        }
       }
       return;
     }
@@ -879,7 +929,7 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     }
     const w = toWorld(pos.x, pos.y);
     const movedPx = drag ? Math.hypot(pos.x - drag.start.x, pos.y - drag.start.y) : 0;
-    if (drag && movedPx > 5) drag.moved = true;
+    if (drag && movedPx > (coarse ? 8 : 5)) drag.moved = true;
 
     if (mode === 'pan' || ((mode === 'click-or-pan' || mode === 'pan-or-click') && drag.moved)) {
       if (mode !== 'pan') mode = 'pan';
@@ -1029,6 +1079,7 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
   }
 
   function onPointerUp(e) {
+    clearTimeout(holdTimer);
     const pos = eventPos(e);
     pointers.delete(e.pointerId);
     if (mode === 'pinch') {
@@ -1110,7 +1161,7 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
   }
 
   function onKeyDown(e) {
-    if (state.step !== 'plan') return;
+    if (state.step !== 'plan' || document.querySelector('dialog[open]')) return;
     const tag = (e.target && e.target.tagName) || '';
     const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
     const mod = e.ctrlKey || e.metaKey;
@@ -1125,8 +1176,14 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
       return;
     }
     if (typing) return;
+    // Keys that edit the plan only act when the plan itself (or nothing) has focus, so
+    // pressing Backspace or an arrow on a focused button never deletes or moves a room.
+    const onPlan = e.target === canvas || e.target === document.body || e.target === document.documentElement;
     if (e.key === ' ') {
-      spaceDown = true;
+      if (onPlan) {
+        spaceDown = true;
+        e.preventDefault();
+      }
       return;
     }
     if (e.key === 'Escape') {
@@ -1144,7 +1201,30 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
       closePoly();
       return;
     }
-    if (e.key === 'Backspace' || e.key === 'Delete') {
+    if (onPlan && e.key.startsWith('Arrow') && state.tool === 'select' && state.selection && !mod) {
+      // Keyboard editing: arrows move the selected room by 1 cm (Shift: 10 cm), or slide the
+      // selected door/window along its wall. A burst of presses is one undo step.
+      e.preventDefault();
+      const step = e.shiftKey ? 0.1 : 0.01;
+      const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+      const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+      const p = current();
+      const sel = state.selection;
+      let next = null;
+      if (sel.type === 'room') next = moveRoom(p, sel.id, dx, dy);
+      else {
+        const op = p.openings.find((o) => o.id === sel.id);
+        if (op) next = updateOpening(p, op.id, { offset: op.offset + (dx || dy) });
+      }
+      if (next) {
+        const now = Date.now();
+        const burst = nudge && nudge.id === sel.id && now - nudge.t < 800;
+        nudge = { id: sel.id, t: now };
+        commit(next, { history: !burst });
+      }
+      return;
+    }
+    if ((e.key === 'Backspace' || e.key === 'Delete') && onPlan) {
       if (state.tool === 'poly' && polyPts.length) {
         polyPts.pop();
         renderHint();
@@ -1179,14 +1259,16 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     const tool = state.tool;
     const sel = state.selection;
     const p = current();
-    const key = [tool, polyPts.length > 0, polyPts.length >= 3, !!rectStart, scalePts.length, sel?.type, !!p.plan?.calibrated, p.rooms.length > 0].join('|');
+    const key = [tool, coarse, polyPts.length > 0, polyPts.length >= 3, !!rectStart, scalePts.length, sel?.type, !!p.plan?.calibrated, p.rooms.length > 0].join('|');
     if (key === hintKey && !force) return;
     hintKey = key;
     clear(hintEl);
     const text = (t) => h('span', { class: 'hint-text' }, t);
     const btn = (label, onclick, cls = '') => h('button', { type: 'button', class: `btn btn-sm ${cls}`, onclick }, label);
     if (tool === 'select') {
-      if (sel?.type === 'room') add(hintEl, text('გადაათრიე კედელი ან კუთხე. ზუსტ სიგრძეს მარჯვენა პანელში ჩაწერ. ხელახლა გადათრევით ოთახი გადაადგილდება.'));
+      if (sel?.type === 'room') add(hintEl, text(coarse
+        ? 'გადაათრიე კედელი ან კუთხე. ოთახის გადასატანად დააჭირე და გააჩერე თითი. ზუსტი სიგრძე — პარამეტრებში.'
+        : 'გადაათრიე კედელი ან კუთხე. ზუსტ სიგრძეს პარამეტრების პანელში ჩაწერ. ხელახლა გადათრევით ოთახი გადაადგილდება.'));
       else if (sel?.type === 'opening') add(hintEl, text('გადაათრიე კედლის გასწვრივ. ტიპი და ზომები მარჯვნივ.'));
       else if (!p.rooms.length) add(hintEl, text('დაიწყე ოთახით: აირჩიე „მართკუთხა ოთახი“ ან „რთული ფორმა“ და შემოხაზე პირველი ოთახი.'));
       else add(hintEl, text('აირჩიე ოთახი, კარი ან ფანჯარა. ბორბლით ან ორი თითით ზომას ცვლი, გადათრევით გადაადგილდები.'));
@@ -1278,7 +1360,7 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
   canvas.addEventListener('pointerdown', onPointerDown);
   canvas.addEventListener('pointermove', onPointerMove);
   canvas.addEventListener('pointerup', onPointerUp);
-  canvas.addEventListener('pointercancel', (e) => { pointers.delete(e.pointerId); mode = null; cancelPreview(); });
+  canvas.addEventListener('pointercancel', (e) => { clearTimeout(holdTimer); pointers.delete(e.pointerId); mode = null; cancelPreview(); });
   canvas.addEventListener('pointerleave', () => { if (!mode) { cursor = null; cursorScreen = null; placing = null; hover = null; draw(); } });
   canvas.addEventListener('wheel', onWheel, { passive: false });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -1318,5 +1400,29 @@ export function createPlanEditor({ wrap, canvas, hintEl, onRoomCreated }) {
     },
     deleteSelection,
     toScreen: (p) => S(p),
+    // Pan (never zoom) so the given world points sit inside the part of the plan that is
+    // not covered by a bottom sheet of `coverPx` screen pixels.
+    reveal(points, coverPx = 0) {
+      if (!points?.length || !W) return;
+      const b = G.bounds(points);
+      const visH = Math.max(80, H - coverPx);
+      const top = sy(b.minY);
+      const bottom = sy(b.maxY);
+      const left = sx(b.minX);
+      const right = sx(b.maxX);
+      let dy = 0;
+      if (bottom - top > visH - 24) dy = 12 - top + (visH - 24 - (bottom - top)) / 2;
+      else if (bottom > visH - 12) dy = visH - 12 - bottom;
+      else if (top < 12) dy = 12 - top;
+      let dx = 0;
+      if (right - left <= W - 24) {
+        if (left < 12) dx = 12 - left;
+        else if (right > W - 12) dx = W - 12 - right;
+      }
+      if (!dx && !dy) return;
+      view.ox += dx;
+      view.oy += dy;
+      draw();
+    },
   };
 }

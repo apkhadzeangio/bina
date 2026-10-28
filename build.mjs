@@ -50,7 +50,8 @@ ${fontLinks}
 <style>html{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}${css}</style>
 </head>
 <body>
-<div id="app"></div>
+<div id="app"><p class="boot" role="status">ბინის დიზაინერი იტვირთება…</p></div>
+<noscript><p class="boot">ბინის დიზაინერს JavaScript სჭირდება. ჩართე ის ბრაუზერის პარამეტრებში.</p></noscript>
 <script>${siteJs}</script>
 </body>
 </html>

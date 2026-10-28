@@ -10,6 +10,9 @@ import { createMaterialsStep } from './materials.js';
 import { createEstimateStep } from './estimate.js';
 import { h, add, clear, icon, toast, copyText } from './dom.js';
 import { loadPdf } from './libs.js';
+import { createOnboarding, firstVisit } from './onboarding.js';
+import * as G from '../core/geometry.js';
+import { roomLabel, OPENING_TYPES } from '../core/model.js';
 
 /* global __SITE__ */ // true only in the lithos.ge build, where file downloads work
 const STEPS = [
@@ -77,12 +80,13 @@ export async function main(root) {
     href: `#${k}`, class: 'step-link', 'data-step': k,
   }, h('span', { class: 'n' }, String(i + 1)), h('span', { class: 'step-label' }, label))));
 
-  const menuBtn = h('button', { type: 'button', class: 'btn btn-sm', 'aria-haspopup': 'true', 'aria-expanded': 'false', id: 'menu-btn' }, icon('menu', 16), h('span', { class: 'hide-sm' }, 'პროექტი'));
-  const menu = h('div', { class: 'menu-pop', hidden: true, role: 'menu' });
+  const menuBtn = h('button', { type: 'button', class: 'btn btn-sm', 'aria-expanded': 'false', 'aria-controls': 'project-menu', id: 'menu-btn' }, icon('menu', 16), h('span', { class: 'hide-sm' }, 'პროექტი'));
+  const menu = h('div', { class: 'menu-pop', hidden: true, id: 'project-menu', 'aria-label': 'პროექტი' });
+  const helpBtn = h('button', { type: 'button', class: 'btn btn-sm icon-btn', id: 'help-btn', title: 'დახმარება (?)', 'aria-label': 'დახმარება', onclick: () => onboarding.showHelp() }, icon('help', 18));
   const header = h('header', { class: 'topbar' },
     h('div', { class: 'brand' }, brandMark(), h('span', { class: 'brand-name' }, 'ბინის დიზაინერი')),
     nav,
-    h('div', { class: 'top-actions' }, menuBtn, menu));
+    h('div', { class: 'top-actions' }, helpBtn, menuBtn, menu));
 
   // ---------------------------------------------------------------- plan step
   const planInput = h('input', { type: 'file', accept: 'image/*,application/pdf,.pdf', hidden: true, id: 'plan-file' });
@@ -96,13 +100,15 @@ export async function main(root) {
     ['window', 'ფანჯარა', 'window', 'W'],
     ['scale', 'მასშტაბი', 'scale', ''],
   ];
+  // aria-label keeps a name when the text label is hidden on narrow screens.
   const toolBtns = toolDefs.map(([k, label, ic, key]) => h('button', {
-    type: 'button', class: 'btn tool', 'data-tool': k, title: key ? `${label} (${key})` : label, onclick: () => setTool(k),
+    type: 'button', class: 'btn tool', 'data-tool': k, title: key ? `${label} (${key})` : label, 'aria-label': label,
+    'aria-keyshortcuts': key || undefined, onclick: () => setTool(k),
   }, icon(ic, 18), h('span', { class: 'tool-label' }, label)));
   const undoBtn = h('button', { type: 'button', class: 'btn tool icon-only', title: 'დაბრუნება (Ctrl+Z)', 'aria-label': 'დაბრუნება', onclick: undo }, icon('undo', 18));
   const redoBtn = h('button', { type: 'button', class: 'btn tool icon-only', title: 'გამეორება (Ctrl+Shift+Z)', 'aria-label': 'გამეორება', onclick: redo }, icon('redo', 18));
   const fitBtn = h('button', { type: 'button', class: 'btn tool icon-only', title: 'მთელი გეგმა ეკრანზე', 'aria-label': 'მთელი გეგმა ეკრანზე', onclick: () => editor.fit() }, icon('fit', 18));
-  const uploadBtn = h('button', { type: 'button', class: 'btn tool', onclick: () => planInput.click() }, icon('upload', 18), h('span', { class: 'tool-label' }, 'გეგმა'));
+  const uploadBtn = h('button', { type: 'button', class: 'btn tool', title: 'გეგმის ატვირთვა (სურათი ან PDF)', 'aria-label': 'გეგმის ატვირთვა', onclick: () => planInput.click() }, icon('upload', 18), h('span', { class: 'tool-label' }, 'გეგმა'));
   const toolbar = h('div', { class: 'toolbar', role: 'toolbar', 'aria-label': 'ხელსაწყოები' },
     h('div', { class: 'tool-group' }, toolBtns),
     h('div', { class: 'tool-group' }, undoBtn, redoBtn, fitBtn, uploadBtn));
@@ -110,15 +116,28 @@ export async function main(root) {
   const hintbar = h('div', { class: 'hintbar', 'aria-live': 'polite' });
   const canvas = h('canvas', { class: 'plan', 'aria-label': 'ბინის გეგმა. გამოიყენე ხელსაწყოები ოთახების დასახაზად.' });
   const pop = h('div', { class: 'purpose-pop', hidden: true, tabindex: '-1', role: 'dialog', 'aria-label': 'ოთახის დანიშნულება' });
-  const canvasWrap = h('div', { class: 'canvas-wrap' }, canvas, pop);
-  const inspectorEl = h('aside', { class: 'inspector', 'aria-label': 'პარამეტრები' });
+  const emptyCard = h('div', { class: 'canvas-empty', hidden: true },
+    h('b', null, 'დაიწყე ბინის გეგმით'),
+    h('p', { class: 'muted' }, 'ატვირთე დეველოპერის გეგმა და შემოხაზე ოთახები, ან დახაზე ისინი პირდაპირ ბადეზე.'),
+    h('div', { class: 'btn-row' },
+      h('button', { type: 'button', class: 'btn btn-accent', onclick: () => planInput.click() }, icon('upload', 18), 'გეგმის ატვირთვა'),
+      h('button', { type: 'button', class: 'btn', onclick: () => setTool('rect') }, icon('rect', 18), 'მართკუთხა ოთახი'),
+      h('button', { type: 'button', class: 'btn', onclick: () => setTool('poly') }, icon('poly', 18), 'რთული ფორმა')));
+  const canvasWrap = h('div', { class: 'canvas-wrap' }, canvas, emptyCard, pop);
+  // On phones and narrow tablets the inspector becomes a bottom sheet over the plan; the
+  // handle shows what is selected and opens or closes the sheet.
+  const inspectorEl = h('div', { class: 'inspector', id: 'inspector' });
+  const sheetTitle = h('span', { class: 'sheet-title' });
+  const sheetHandle = h('button', { type: 'button', class: 'sheet-handle', 'aria-controls': 'inspector', 'aria-expanded': 'false' },
+    h('span', { class: 'grip', 'aria-hidden': 'true' }), sheetTitle, icon('chevron', 18));
+  const sheet = h('aside', { class: 'sheet', 'data-sheet': 'peek', 'aria-label': 'პარამეტრები' }, sheetHandle, inspectorEl);
   const banner = h('div', { class: 'sample-banner', hidden: true });
 
   const planSection = h('section', { class: 'step step-plan', id: 'step-plan' },
     banner,
     h('div', { class: 'plan-layout' },
       h('div', { class: 'plan-main panel' }, toolbar, hintbar, canvasWrap),
-      inspectorEl));
+      sheet));
   const matSection = h('section', { class: 'step step-materials', id: 'step-materials', hidden: true });
   const estSection = h('section', { class: 'step step-estimate', id: 'step-estimate', hidden: true });
 
@@ -152,6 +171,8 @@ export async function main(root) {
   }
   function showPurposePopover(room, pt) {
     popRoom = room.id;
+    // Keep the bottom sheet out of the way while the purpose is picked.
+    if (window.matchMedia('(max-width: 860px)').matches) setSheet('peek');
     clear(pop);
     add(pop, 
       h('div', { class: 'pop-head' }, h('b', null, 'რა ოთახია?'), h('button', { type: 'button', class: 'btn btn-ghost btn-sm', onclick: hidePop }, 'მოგვიანებით')),
@@ -238,7 +259,7 @@ export async function main(root) {
   function renderMenu() {
     clear(menu);
     let armed = false;
-    const newBtn = h('button', { type: 'button', class: 'menu-item', role: 'menuitem' }, icon('plus', 16), 'ახალი ცარიელი პროექტი');
+    const newBtn = h('button', { type: 'button', class: 'menu-item' }, icon('plus', 16), 'ახალი ცარიელი პროექტი');
     newBtn.addEventListener('click', () => {
       if (!armed && current().rooms.length && !current().sample) {
         armed = true;
@@ -249,15 +270,28 @@ export async function main(root) {
       closeMenu();
       newProject(emptyProject());
     });
+    // Opening the sample replaces the plan, so it asks for a second click like "new project".
+    let sampleArmed = false;
+    const sampleBtn = h('button', { type: 'button', class: 'menu-item' }, icon('layers', 16), 'ნიმუშის გახსნა');
+    sampleBtn.addEventListener('click', () => {
+      if (!sampleArmed && current().rooms.length && !current().sample) {
+        sampleArmed = true;
+        sampleBtn.lastChild.textContent = 'დაადასტურე: მიმდინარე გეგმა შეიცვლება ნიმუშით';
+        sampleBtn.classList.add('danger');
+        return;
+      }
+      closeMenu();
+      newProject(sampleProject());
+    });
     const exportJson = () => JSON.stringify({ ...current(), planImage: state.planImageData || null });
     const fallback = h('textarea', { class: 'copy-fallback', hidden: true, readonly: true, 'aria-label': 'პროექტის ტექსტი' });
     add(menu, 
       newBtn,
-      h('button', { type: 'button', class: 'menu-item', role: 'menuitem', onclick: () => { closeMenu(); newProject(sampleProject()); } }, icon('layers', 16), 'ნიმუშის გახსნა'),
+      sampleBtn,
       h('div', { class: 'menu-sep' }),
       __SITE__
         ? h('button', {
-          type: 'button', class: 'menu-item', role: 'menuitem',
+          type: 'button', class: 'menu-item',
           onclick: () => {
             const blob = new Blob([exportJson()], { type: 'application/json' });
             const a = h('a', { href: URL.createObjectURL(blob), download: `${current().name || 'bina'}.json` });
@@ -268,14 +302,14 @@ export async function main(root) {
           },
         }, icon('download', 16), 'პროექტის შენახვა ფაილად')
         : h('button', {
-          type: 'button', class: 'menu-item', role: 'menuitem',
+          type: 'button', class: 'menu-item',
           onclick: async () => {
             const ok = await copyText(exportJson(), fallback);
             toast(ok ? 'პროექტი დაკოპირდა. შეინახე ტექსტურ ფაილში .json გაფართოებით.' : 'მონიშნული ტექსტი დააკოპირე ხელით.', ok ? 'ok' : 'info');
             if (ok) closeMenu();
           },
         }, icon('copy', 16), 'პროექტის კოპირება (JSON)'),
-      h('button', { type: 'button', class: 'menu-item', role: 'menuitem', onclick: () => { closeMenu(); jsonInput.click(); } }, icon('upload', 16), 'პროექტის გახსნა ფაილიდან'),
+      h('button', { type: 'button', class: 'menu-item', onclick: () => { closeMenu(); jsonInput.click(); } }, icon('upload', 16), 'პროექტის გახსნა ფაილიდან'),
       fallback,
       state.saveError ? h('p', { class: 'menu-note warn' }, state.saveError) : h('p', { class: 'menu-note' }, 'პროექტი ავტომატურად ინახება ამ ბრაუზერში.'),
     );
@@ -311,9 +345,9 @@ export async function main(root) {
     if (!p.sample) return;
     clear(banner);
     add(banner, 
-      h('div', { class: 'banner-txt' }, h('b', null, 'ეს ნიმუშია: '), '3-ოთახიანი ბინა, 73 მ². დაათვალიერე, შემდეგ დახაზე შენი.'),
+      h('div', { class: 'banner-txt' }, h('b', null, 'ეს ნიმუშია'), h('span', { class: 'hide-sm' }, ': 3-ოთახიანი ბინა, 73 მ². დაათვალიერე, შემდეგ დახაზე შენი.')),
       h('div', { class: 'btn-row' },
-        h('button', { type: 'button', class: 'btn btn-sm btn-accent', onclick: () => planInput.click() }, icon('upload', 16), 'ჩემი გეგმის ატვირთვა'),
+        h('button', { type: 'button', class: 'btn btn-sm btn-accent', 'aria-label': 'ჩემი გეგმის ატვირთვა', onclick: () => planInput.click() }, icon('upload', 16), h('span', { class: 'hide-sm' }, 'ჩემი გეგმის '), 'ატვირთვა'),
         h('button', { type: 'button', class: 'btn btn-sm', onclick: () => newProject(emptyProject()) }, 'ცარიელი ბადე')),
     );
   }
@@ -357,6 +391,7 @@ export async function main(root) {
       editor.resize();
       inspector.render();
     }
+    renderEmpty();
     if (step === 'materials') materials.show();
     if (step === 'estimate') estimate.show();
     window.scrollTo(0, 0);
@@ -370,10 +405,125 @@ export async function main(root) {
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => emit('theme'));
   new MutationObserver(() => emit('theme')).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
+  // ---------------------------------------------------------------- empty plan
+  function renderEmpty() {
+    const p = current();
+    emptyCard.hidden = !(state.step === 'plan' && !p.rooms.length && !(state.planImage && p.plan) && state.tool === 'select');
+  }
+
+  // ---------------------------------------------------------------- bottom sheet (narrow screens)
+  const SHEET = ['peek', 'half', 'full'];
+  const setSheet = (v) => {
+    sheet.dataset.sheet = v;
+    sheetHandle.setAttribute('aria-expanded', v === 'peek' ? 'false' : 'true');
+    sheetHandle.setAttribute('aria-label', v === 'peek' ? 'პარამეტრების გაშლა' : 'პარამეტრების ჩაკეცვა');
+  };
+  function renderSheetTitle() {
+    const p = current();
+    const sel = state.selection;
+    let t = `ბინა · ${p.rooms.length} ოთახი`;
+    if (sel?.type === 'room') {
+      const r = p.rooms.find((x) => x.id === sel.id);
+      if (r) t = `${roomLabel(r, p.rooms)} · ${G.area(r.points).toFixed(2)} მ²`;
+    } else if (sel?.type === 'opening') {
+      const o = p.openings.find((x) => x.id === sel.id);
+      if (o) t = OPENING_TYPES[o.type].label;
+    }
+    sheetTitle.textContent = t;
+  }
+  let sheetDrag = null;
+  sheetHandle.addEventListener('pointerdown', (e) => {
+    sheetDrag = { y: e.clientY };
+    sheetHandle.setPointerCapture?.(e.pointerId);
+  });
+  sheetHandle.addEventListener('pointerup', (e) => {
+    if (!sheetDrag) return;
+    const dy = e.clientY - sheetDrag.y;
+    sheetDrag = null;
+    const i = SHEET.indexOf(sheet.dataset.sheet);
+    if (dy < -30) setSheet(SHEET[Math.min(2, i + 1)]);
+    else if (dy > 30) setSheet(SHEET[Math.max(0, i - 1)]);
+    else return; // a tap: handled by click
+    sheetHandle.dataset.dragged = '1';
+  });
+  sheetHandle.addEventListener('click', () => {
+    if (sheetHandle.dataset.dragged) {
+      delete sheetHandle.dataset.dragged;
+      return;
+    }
+    setSheet(sheet.dataset.sheet === 'peek' ? 'half' : 'peek');
+  });
+  let lastSel = null;
+  subscribe((kind) => {
+    if (kind === 'selection' || kind === 'project') {
+      const key = state.selection ? `${state.selection.type}:${state.selection.id}` : null;
+      // Selecting something opens the sheet so its details can be edited.
+      if (kind === 'selection' && key && key !== lastSel && sheet.dataset.sheet === 'peek') {
+        setSheet('half');
+        // Then keep the selected room in view above the sheet.
+        setTimeout(() => {
+          const p = current();
+          const sel = state.selection;
+          const room = sel && p.rooms.find((r) => r.id === (sel.type === 'room' ? sel.id : p.openings.find((o) => o.id === sel.id)?.roomId));
+          if (!room || getComputedStyle(sheet).position !== 'fixed') return;
+          const cover = canvas.getBoundingClientRect().bottom - sheet.getBoundingClientRect().top;
+          editor.reveal(room.points, Math.max(0, cover));
+        }, 260);
+      }
+      // Nothing selected any more: give the plan its space back.
+      if (!key && lastSel) setSheet('peek');
+      lastSel = key;
+      renderSheetTitle();
+    }
+    if (['project', 'tool', 'image'].includes(kind)) renderEmpty();
+  });
+  setSheet('peek');
+  renderSheetTitle();
+
+  // ---------------------------------------------------------------- onboarding and help
+  const onboarding = createOnboarding({
+    onUpload: () => planInput.click(),
+    onDraw: () => {
+      newProject(emptyProject());
+      setTool('rect');
+    },
+    onSample: () => {
+      if (!current().sample) newProject(sampleProject());
+      go('plan');
+    },
+  });
+  document.addEventListener('keydown', (e) => {
+    const tag = e.target?.tagName || '';
+    if (e.key === '?' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) && !onboarding.open) {
+      e.preventDefault();
+      onboarding.showHelp();
+    }
+  });
+
+  // ---------------------------------------------------------------- never lose work
+  // An unexpected error must not take unsaved edits with it.
+  const onCrash = () => {
+    try {
+      saveNow();
+    } catch (err) { /* ignore */ }
+    toast('მოხდა მოულოდნელი შეცდომა. პროექტი შენახულია; თუ რამე არასწორად ჩანს, გადატვირთე გვერდი.', 'warn');
+  };
+  window.addEventListener('error', onCrash);
+  window.addEventListener('unhandledrejection', onCrash);
+  // If the browser could not save, ask before the page is closed.
+  window.addEventListener('beforeunload', (e) => {
+    if (state.saveError) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+
   renderBanner();
   syncToolbar();
   showStep();
+  renderEmpty();
   inspector.render();
   if (saved.notice) toast(saved.notice, 'warn');
   else if (state.saveError) toast(state.saveError, 'warn');
+  if (firstVisit() && current().sample && !saved.notice) onboarding.showWelcome();
 }
