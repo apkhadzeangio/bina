@@ -1,0 +1,38 @@
+# Publishes dist/site to the existing Cloudflare Pages project "bina"
+# (bina-csn.pages.dev, custom domain bina.lithos.ge) on every push to main.
+# The project was created by direct upload, which Cloudflare cannot switch
+# to its Git integration, so deployment runs from here with Wrangler.
+# Needs two repository secrets: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cloudflare-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check the page is there
+        run: |
+          test -s dist/site/index.html
+          grep -q '<title>ბინის დიზაინერი</title>' dist/site/index.html
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist/site --project-name=bina --branch=main
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}

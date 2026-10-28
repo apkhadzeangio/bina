@@ -25,11 +25,13 @@ npm run build   # dist/artifact.html და dist/site/index.html
 
 3D (three.js r128) და PDF-ის გახსნა (pdf.js 3.11.174) cdnjs-დან იტვირთება მხოლოდ საჭიროებისას.
 
-## Cloudflare Pages (GitHub-დან)
+## გამოქვეყნება
 
-- Framework preset: None
-- Build command: ცარიელი (მზა გვერდი უკვე `dist/site/index.html`-შია)
-- Build output directory: `dist/site`
-- Custom domain: `bina.lithos.ge`
+Cloudflare Pages-ის პროექტი `bina` (`bina-csn.pages.dev`, დომენი `bina.lithos.ge`) ფაილის ატვირთვით შეიქმნა. ასეთ პროექტს Cloudflare Git-ის ინტეგრაციაზე ვერ გადაიყვანს, ამიტომ გამოქვეყნებას GitHub Actions აკეთებს (`.github/workflows/deploy.yml`). `main`-ში ყოველი push-ის შემდეგ ის `dist/site`-ს ამ პროექტში ტვირთავს.
 
-კოდის შეცვლის შემდეგ: `npm run build`, შემდეგ commit და push. Cloudflare ახალ ვერსიას თავისით გამოაქვეყნებს.
+რეპოზიტორიის Settings → Secrets and variables → Actions-ში ორი საიდუმლო უნდა იყოს:
+
+- `CLOUDFLARE_API_TOKEN` — Cloudflare-ის API ტოკენი, უფლებით Account → Cloudflare Pages → Edit.
+- `CLOUDFLARE_ACCOUNT_ID` — Cloudflare-ის ანგარიშის ID.
+
+კოდის შეცვლის შემდეგ: `npm test`, `npm run build`, შემდეგ commit და push.
