@@ -21,7 +21,7 @@ import { migrateProject } from '../../src/core/model.js';
 const { chromium } = createRequire(import.meta.url)('playwright');
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const OUT = resolve(process.argv[2] || join(ROOT, 'e2e-shots'));
-const LIBS = process.env.BINA_LIBS;
+const LIBS = process.env.BINA_LIBS || join(ROOT, 'node_modules');
 mkdirSync(OUT, { recursive: true });
 const PAGE = readFileSync(join(ROOT, 'dist/site/index.html'), 'utf8');
 const URL0 = 'http://bina.test/';
@@ -52,7 +52,7 @@ function seedProject() {
 const saved = (pg) => pg.evaluate(() => JSON.parse(localStorage.getItem('bina-designer:project:v1') || 'null'));
 const settle = (pg, ms = 450) => pg.waitForTimeout(ms);
 const errors = [];
-const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: process.env.BINA_CHROMIUM || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'] });
 
 async function newPage(opts) {
   const ctx = await browser.newContext({ deviceScaleFactor: 1, acceptDownloads: true, ...opts });

@@ -38,11 +38,15 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
       h('div', { class: 'mat-col' }, panel, totalBar)),
     dialog,
   );
+  // Shared by Materials and Scene; a hidden step must not hide its modal.
+  document.body.append(dialog);
 
   let view = null;
   let viewFailed = false;
   let focusRoom = null;
   let needsRefit = true;
+  const viewHome = viewBox.parentElement;
+  let pendingView = null;
 
   function showViewError(msg, retry) {
     viewMsg.hidden = false;
@@ -51,7 +55,12 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
       retry ? h('button', { type: 'button', class: 'btn btn-sm', onclick: () => { viewFailed = false; viewMsg.textContent = '3D ხედი იტვირთება…'; ensureView(); } }, 'თავიდან ცდა') : null);
   }
 
-  async function ensureView() {
+  function ensureView() {
+    if (pendingView) return pendingView;
+    pendingView = initView().finally(() => { pendingView = null; });
+    return pendingView;
+  }
+  async function initView() {
     if (view || viewFailed) return;
     let THREE;
     try {
@@ -402,6 +411,7 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
   }
 
   subscribe((kind) => {
+    if (state.step === 'scene' && kind === 'project') board.refresh();
     if (state.step !== 'materials') return;
     if (kind === 'project' || kind === 'theme') {
       board.refresh();
@@ -413,7 +423,23 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
   });
 
   return {
+    openBoard(id) { board.open(id); },
+    openPicker,
+    async sceneView(container, { retry = false } = {}) {
+      if (retry) viewFailed = false;
+      await ensureView();
+      if (!view || state.step !== 'scene') return null;
+      container.append(viewBox);
+      view.update(current());
+      view.resize();
+      return view;
+    },
     show() {
+      if (viewBox.parentElement !== viewHome) {
+        viewHome.prepend(viewBox);
+        view?.leavePreparation();
+        needsRefit = true;
+      }
       render();
       renderCaption();
       ensureView().then(() => {
