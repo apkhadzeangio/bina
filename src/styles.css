@@ -17,6 +17,8 @@
   --grid: #e8eae5;
   --grid-major: #d4d8d0;
   --wall: #262c30;
+  --furn: #fdfdfb;
+  --furn-ink: #3a4246;
   --p-dry: #ead8b8;
   --p-kitchen: #d1e1c1;
   --p-wet: #c1d8e8;
@@ -50,6 +52,8 @@
     --grid: #1d2225;
     --grid-major: #283034;
     --wall: #d8dedb;
+    --furn: #20262a;
+    --furn-ink: #b9c2c6;
     --p-dry: #4b4231;
     --p-kitchen: #36462f;
     --p-wet: #2b4253;
@@ -80,6 +84,8 @@
   --grid: #1d2225;
   --grid-major: #283034;
   --wall: #d8dedb;
+  --furn: #20262a;
+  --furn-ink: #b9c2c6;
   --p-dry: #4b4231;
   --p-kitchen: #36462f;
   --p-wet: #2b4253;
@@ -434,6 +440,10 @@ canvas.plan:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 .view-msg { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--muted); }
 .view-tools { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; }
 .btn-float { background: color-mix(in srgb, var(--panel) 92%, transparent); backdrop-filter: blur(6px); }
+.seg-float { background: color-mix(in srgb, var(--panel-2) 92%, transparent); backdrop-filter: blur(6px); }
+.seg-float .seg-btn { flex: none; padding: 6px 10px; font-size: 12.5px; white-space: nowrap; }
+.view-tools { flex-wrap: wrap; justify-content: flex-end; left: 10px; pointer-events: none; }
+.view-tools > * { pointer-events: auto; }
 .btn-float.on { color: var(--accent); border-color: var(--accent); }
 .view-caption { font-size: 13px; min-height: 20px; }
 .mat-col { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
@@ -542,6 +552,42 @@ canvas.plan:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 .tier { font-size: 10.5px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
 .tier-prem { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); color: var(--accent); }
 .picker-foot { padding-bottom: 16px; }
+
+/* ------------------------------------------------------------------ furniture library */
+.lib .lib-room { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 10px; font-size: 13px; }
+.lib .lib-room label { color: var(--muted); }
+.lib-body { overflow-y: auto; padding-block: 6px 18px; display: flex; flex-direction: column; gap: 14px; margin-inline: 0 !important; padding-inline: 18px; }
+.lib-sec h3 { font: 600 14px/1.3 var(--font-display); margin: 6px 0 8px; }
+.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 8px; }
+.lib-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 6px 9px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  cursor: pointer;
+  text-align: center;
+}
+.lib-card:hover, .lib-card:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); outline: none; }
+.lib-thumb { display: grid; place-items: center; width: 100%; padding: 4px 0; border-radius: 6px; background: var(--plan-bg); }
+.lib-name { font-weight: 500; font-size: 12.5px; line-height: 1.3; }
+.lib-size { font-size: 11px; color: var(--muted); }
+
+/* furniture in the inspector */
+.f-dot { width: 11px; height: 11px; border-radius: 3px; flex: none; border: 1.5px solid var(--muted); background: var(--furn); }
+.f-dot.warn, .f-dot.error { border-color: var(--warn); background: var(--warn-soft); }
+.field-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.field-grid-3 .num-in { width: 100%; min-width: 0; }
+.field-grid-3 .field-in { display: flex; }
+.snap-row { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.warn-list li.warn { color: var(--warn); }
+.warn-list li.error { color: var(--warn); font-weight: 600; }
+.card-sec .seg { flex-wrap: wrap; }
+.card-sec .seg-btn { font-family: var(--font-mono); font-size: 12px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ------------------------------------------------------------------ estimate step */
 .step-estimate { overflow-y: auto; }
@@ -674,6 +720,19 @@ kbd { font: 500 12px/1.4 var(--font-mono); padding: 1px 6px; border: 1px solid v
 }
 
 /* ------------------------------------------------------------------ narrow screens */
+.hint-extra { display: contents; }
+/* the toolbar keeps one row: door, window, 3D and upload go icon-only first, then all tools */
+@media (max-width: 1440px) {
+  .tool[data-tool="door"] .tool-label, .tool[data-tool="window"] .tool-label, .tool-group:last-child .tool-label { display: none; }
+}
+@media (max-width: 1240px) {
+  .tool-label { display: none; }
+  .tool { padding: 8px; }
+}
+@media (max-width: 860px) {
+  .hintbar .hint-extra { display: none; }
+}
+@media (hover: none) { .kbd-only { display: none; } }
 @media (max-width: 1080px) {
   .tool-label { display: none; }
   .tool { padding: 8px; }
@@ -719,6 +778,8 @@ kbd { font: 500 12px/1.4 var(--font-mono); padding: 1px 6px; border: 1px solid v
   .purpose-grid { grid-template-columns: 1fr 1fr; }
   .field-grid { grid-template-columns: 1fr 1fr; }
   .toolbar { justify-content: flex-start; }
+  .lib-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .picker.lib { width: 100vw; max-width: 100vw; max-height: 92dvh; margin: auto 0 0; border-radius: 16px 16px 0 0; }
 }
 
 /* ------------------------------------------------------------------ phones and narrow tablets: plan fills the screen,

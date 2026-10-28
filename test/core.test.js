@@ -6,6 +6,7 @@ import {
 } from '../src/core/geometry.js';
 import { makeRoom, makeOpening, emptyProject, sampleProject, migrateProject } from '../src/core/model.js';
 import { measureProject, measureRoom, openingHosts, defaultKitchenRun } from '../src/core/measure.js';
+import { runFurniture } from '../src/core/furniture.js';
 
 const close = (a, b, eps = 1e-6, msg) => assert.ok(Math.abs(a - b) < eps, `${msg || ''} expected ${b}, got ${a}`);
 
@@ -94,14 +95,14 @@ test('bathroom: full-height tile, waterproofing, vanity and sanitary set', () =>
 
 test('kitchen run: countertop, backsplash, corner', () => {
   const r = makeRoom(rectPoints(0, 0, 3, 4), 'kitchen');
-  r.kitchen = { runs: [{ edge: 0, start: 0, length: 3 }] };
   const p = project([r]);
+  p.furniture = [runFurniture(r, { edge: 0, start: 0, length: 3 })];
   let m = measureRoom(r, p);
   close(m.countertopArea, 0.62 * 3);
   close(m.backsplashArea, 1.8);
   close(m.wallPaintArea, 14 * 2.7 - 1.8);
   close(m.skirtingLength, 14 - 3);
-  r.kitchen = { runs: [{ edge: 0, start: 0, length: 3 }, { edge: 1, start: 0, length: 2 }] };
+  p.furniture.push(runFurniture(r, { edge: 1, start: 0, length: 2 }));
   m = measureRoom(r, p);
   close(m.countertopArea, 0.62 * (5 - 0.62));
   close(m.backsplashArea, 3.0);
@@ -109,9 +110,10 @@ test('kitchen run: countertop, backsplash, corner', () => {
 
 test('window over the counter reduces the backsplash', () => {
   const r = makeRoom(rectPoints(0, 0, 3, 4), 'kitchen');
-  r.kitchen = { runs: [{ edge: 0, start: 0, length: 3 }] };
   const w = makeOpening(r.id, 0, 1.5, 'window'); // sill 0.9 → overlaps band 0.9–1.5 fully
-  const m = measureRoom(r, project([r], [w]));
+  const p = project([r], [w]);
+  p.furniture = [runFurniture(r, { edge: 0, start: 0, length: 3 })];
+  const m = measureRoom(r, p);
   close(m.backsplashArea, 1.8 - 1.4 * 0.6);
 });
 

@@ -177,8 +177,11 @@ export function isValidPolygon(pts, minEdge = 0.05) {
   return !selfIntersects(pts);
 }
 
+// Round to a step. Dividing by the inverse step keeps decimal results exact in floating
+// point (3.3, not 3.3000000000000003), so saved coordinates stay clean.
 export function round(v, step = 0.001) {
-  return Math.round(v / step) * step;
+  const inv = 1 / step;
+  return Math.round(v * inv) / inv;
 }
 
 export function roundPoint(p, step = 0.001) {

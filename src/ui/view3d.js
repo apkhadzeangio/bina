@@ -5,8 +5,13 @@ import { PURPOSES, OPENING_TYPES } from '../core/model.js';
 import { openingHosts, kitchenRuns, roomHeight, GEOMETRY_RULES } from '../core/measure.js';
 import { resolveMaterial } from '../core/finishes.js';
 import { STYLES } from '../core/catalog.js';
+import { corners as furnitureCorners } from '../core/furniture.js';
 import { texturePatch, isTextured } from './textures.js';
 import { cssVar } from './dom.js';
+import { buildFurniture, FURNITURE_PALETTE } from './furniture3d.js';
+
+const DEG = Math.PI / 180;
+const EYE_HEIGHT = 1.6;
 
 export function createView3D({ THREE, container, onPickRoom }) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -38,8 +43,13 @@ export function createView3D({ THREE, container, onPickRoom }) {
   let lastProject = null;
   let focused = null;
   // Camera starts south of the plan looking north, so the 3D view reads like the drawing.
-  const ctl = { target: new THREE.Vector3(5, 0, 4), theta: 1.22, phi: 0.8, dist: 16 };
+  const ctl = { target: new THREE.Vector3(5, 0, 4), theta: 1.22, phi: 0.8, dist: 16, phiMin: 0.12, phiMax: 1.45 };
   let anim = null;
+  // Viewpoint: 'overview' (whole apartment from above at an angle), 'top' (plan view) or
+  // 'room' (standing in a corner of one room at eye height, under its ceiling).
+  let viewKind = 'overview';
+  let eye = null; // { roomId, corner }
+  let cutBeforeRoom = false;
 
   const texCache = new Map();
   const matCache = new Map();
@@ -223,7 +233,7 @@ export function createView3D({ THREE, container, onPickRoom }) {
       const upperM = purpose.wet ? resolveMaterial(p, room, 'walls_upper').material : null;
       const splashM = purpose.kitchen ? resolveMaterial(p, room, 'backsplash').material : null;
       const tileH = purpose.wet ? Math.min(fullH, room.tileHeight ?? fullH) : null;
-      const runs = purpose.kitchen ? kitchenRuns(room) : [];
+      const runs = purpose.kitchen ? kitchenRuns(room, p) : [];
       const G2 = GEOMETRY_RULES;
 
       for (const e of G.edges(room.points)) {
@@ -282,6 +292,10 @@ export function createView3D({ THREE, container, onPickRoom }) {
               const sm = sillMat.look.kind === 'stone' ? matFor(sillMat, { repeatW: len, repeatH: 0.3 }) : matFor(sillMat);
               addBox(deco, len, 0.03, 0.3, sm, c.x - e.nx * 0.1 + e.nx * 0.04, op.sill + 0.015, c.y - e.ny * 0.1 + e.ny * 0.04, rot, false);
             }
+          } else if (op.type === 'door' && doorMat && viewKind === 'room') {
+            // standing in a room the doors are shut, like in an interior photo
+            const hh = Math.min(op.height, h) - 0.02;
+            addBox(deco, op.width - 0.04, hh, 0.04, matFor(doorMat), c.x - e.nx * 0.05, hh / 2, c.y - e.ny * 0.05, rot);
           } else if (op.type === 'door' && doorMat) {
             // an open door leaf turned into the room
             const hinge = { x: c.x - e.ux * op.width / 2, y: c.y - e.uy * op.width / 2 };
@@ -301,24 +315,10 @@ export function createView3D({ THREE, container, onPickRoom }) {
         }
       }
 
-      // kitchen base cabinets and countertop
-      for (const r of runs) {
-        const e = G.edge(room.points, r.edge);
-        const mid = r.start + r.length / 2;
-        const cx = e.a.x + e.ux * mid + e.nx * 0.3;
-        const cz = e.a.y + e.uy * mid + e.ny * 0.3;
-        const rot = -Math.atan2(e.uy, e.ux);
-        addBox(group, r.length, 0.86, 0.6, cabinet, cx, 0.43, cz, rot);
-        const top = resolveMaterial(p, room, 'countertop').material;
-        if (top) {
-          const tx = e.a.x + e.ux * mid + e.nx * 0.31;
-          const tz = e.a.y + e.uy * mid + e.ny * 0.31;
-          addBox(group, r.length, 0.04, G2.counterDepth, matFor(top, { repeatW: r.length, repeatH: G2.counterDepth }), tx, 0.88 + (r.edge % 2) * 0.001, tz, rot);
-        }
-      }
-
-      // bathroom vanity on the longest wall without openings
-      if (purpose.surfaces.vanity) {
+      // A bathroom without a vanity unit drawn on the plan still shows the standard one
+      // the estimate counts, on the longest wall without openings.
+      const hasVanity = (p.furniture || []).some((f) => f.type === 'vanity' && f.roomId === room.id);
+      if (purpose.surfaces.vanity && !hasVanity) {
         const es = G.edges(room.points);
         const free = es.filter((e) => !(hosts.get(`${room.id}:${e.i}`) || []).length && e.len >= 1);
         const e = (free.length ? free : es).reduce((m, x) => (x.len > m.len ? x : m));
@@ -329,6 +329,40 @@ export function createView3D({ THREE, container, onPickRoom }) {
         addBox(group, G2.vanityLength, 0.5, G2.vanityDepth, cabinet, cx, 0.6, cz, rot);
         const top = resolveMaterial(p, room, 'vanity').material;
         if (top) addBox(group, G2.vanityLength, 0.03, G2.vanityDepth, matFor(top, { repeatW: G2.vanityLength, repeatH: G2.vanityDepth }), cx, 0.865, cz, rot);
+      }
+    }
+
+    // furniture: the same pieces, sizes and positions as on the plan
+    const pal = FURNITURE_PALETTE[p.style] || FURNITURE_PALETTE.modern;
+    const roomsById = new Map(p.rooms.map((r) => [r.id, r]));
+    const mats = {
+      plain: plainMat,
+      cabinet,
+      pal,
+      top(room, surface, len, depth) {
+        const m = room ? resolveMaterial(p, room, surface).material : null;
+        return m ? matFor(m, { repeatW: len, repeatH: depth }) : plainMat(pal.stone);
+      },
+      glass,
+    };
+    for (const f of p.furniture || []) {
+      const g = buildFurniture(THREE, f, roomsById.get(f.roomId) || null, mats);
+      g.position.set(f.x, 0, f.y);
+      g.rotation.y = -f.rot * DEG;
+      g.userData.furnitureId = f.id;
+      group.add(g);
+    }
+
+    // standing in a room: close it with a ceiling
+    if (viewKind === 'room' && eye) {
+      const room = roomsById.get(eye.roomId);
+      if (room) {
+        const shape = new THREE.Shape(room.points.map((q) => new THREE.Vector2(q.x, -q.y)));
+        const cg = new THREE.ShapeGeometry(shape);
+        cg.rotateX(Math.PI / 2); // facing down
+        const ceil = new THREE.Mesh(cg, plainMat('#f3f2ee', { side: THREE.DoubleSide }));
+        ceil.position.y = roomHeight(room, p);
+        group.add(ceil);
       }
     }
 
@@ -356,7 +390,7 @@ export function createView3D({ THREE, container, onPickRoom }) {
       outline.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
       outline = null;
     }
-    if (!focused || !lastProject) return;
+    if (!focused || !lastProject || viewKind === 'room') return;
     const room = lastProject.rooms.find((r) => r.id === focused);
     if (!room) return;
     outline = new THREE.Group();
@@ -468,7 +502,7 @@ export function createView3D({ THREE, container, onPickRoom }) {
     if (dragInfo?.pan) panBy(dx, dy);
     else {
       ctl.theta += dx * 0.006;
-      ctl.phi = Math.max(0.12, Math.min(1.45, ctl.phi - dy * 0.006));
+      ctl.phi = Math.max(ctl.phiMin, Math.min(ctl.phiMax, ctl.phi - dy * 0.006));
     }
     render();
   });
@@ -483,7 +517,7 @@ export function createView3D({ THREE, container, onPickRoom }) {
   el.addEventListener('contextmenu', (e) => e.preventDefault());
   el.addEventListener('wheel', (e) => {
     e.preventDefault();
-    ctl.dist = Math.max(2, Math.min(80, ctl.dist * Math.exp(e.deltaY * 0.0012)));
+    ctl.dist = Math.max(viewKind === 'room' ? 0.6 : 2, Math.min(80, ctl.dist * Math.exp(e.deltaY * 0.0012)));
     render();
   }, { passive: false });
 
@@ -506,17 +540,105 @@ export function createView3D({ THREE, container, onPickRoom }) {
 
   new ResizeObserver(resize).observe(container);
 
+  // Corners of a room to stand in, best first: not inside a tall piece of furniture, not
+  // pressed against furniture, and facing the room's main piece from across the room —
+  // the way an interior photo is taken.
+  function eyeSpots(project, room) {
+    const es = G.edges(room.points);
+    const n = room.points.length;
+    const mid = G.labelPoint(room.points);
+    const inRoom = (project.furniture || []).filter((f) => f.roomId === room.id);
+    const tall = inRoom.filter((f) => f.h > 1.0).map((f) => furnitureCorners(f, 0.15));
+    const polys = inRoom.filter((f) => f.h > 1.2).map((f) => furnitureCorners(f)); // you can see over low pieces
+    const main = inRoom.reduce((m, f) => (!m || f.w * f.d > m.w * m.d ? f : m), null);
+    const focus = main ? { x: main.x, y: main.y } : mid;
+    const spots = [];
+    for (let k = 0; k < n; k++) {
+      const a = es[(k - 1 + n) % n];
+      const b = es[k];
+      let bx = a.nx + b.nx;
+      let by = a.ny + b.ny;
+      const L = Math.hypot(bx, by);
+      if (L < 1e-6) continue;
+      bx /= L;
+      by /= L;
+      const q = { x: room.points[k].x + bx * 0.5, y: room.points[k].y + by * 0.5 };
+      if (!G.pointInPolygon(q, room.points)) continue;
+      const blocked = tall.some((poly) => G.pointInPolygon(q, poly));
+      const near = polys.some((poly) => G.pointInPolygon(q, poly) || G.distToPolygonEdges(q, poly) < 0.45);
+      spots.push({ k, q, score: (blocked ? 100 : 0) + (near ? 10 : 0) - Math.hypot(q.x - focus.x, q.y - focus.y) });
+    }
+    spots.sort((u, v) => u.score - v.score);
+    return { spots, mid };
+  }
+
+  function applyView(project) {
+    if (viewKind === 'room' && eye) {
+      const room = project.rooms.find((r) => r.id === eye.roomId);
+      const { spots, mid } = room ? eyeSpots(project, room) : { spots: [] };
+      if (spots.length) {
+        const s0 = spots[((eye.corner % spots.length) + spots.length) % spots.length];
+        const pos = new THREE.Vector3(s0.q.x, EYE_HEIGHT, s0.q.y);
+        const target = new THREE.Vector3(mid.x, 1.15, mid.y);
+        const d = pos.clone().sub(target);
+        ctl.target.copy(target);
+        ctl.dist = d.length();
+        ctl.phi = Math.acos(d.y / ctl.dist);
+        ctl.theta = Math.atan2(d.z, d.x);
+        ctl.phiMin = 0.5;
+        ctl.phiMax = 1.75;
+        camera.fov = 64;
+        camera.updateProjectionMatrix();
+        return;
+      }
+      viewKind = 'overview';
+    }
+    ctl.phiMin = viewKind === 'top' ? 0.01 : 0.12;
+    ctl.phiMax = 1.45;
+    camera.fov = 38;
+    camera.updateProjectionMatrix();
+    if (viewKind === 'top') {
+      ctl.theta = Math.PI / 2; // north up, like the plan
+      ctl.phi = 0.012;
+    } else {
+      ctl.theta = 1.22;
+      ctl.phi = 0.8;
+    }
+    fitTo(focused && project.rooms.find((r) => r.id === focused) ? G.bounds(project.rooms.find((r) => r.id === focused).points) : bounds, false);
+  }
+
+  function largestRoom(project) {
+    return project.rooms
+      .filter((r) => !PURPOSES[r.purpose]?.outdoor)
+      .reduce((m, r) => (!m || G.area(r.points) > G.area(m.points) ? r : m), null);
+  }
+
   return {
     update(project, { refit = false } = {}) {
       const bg = cssVar('--view-bg') || '#e9ebe8';
       scene.background = new THREE.Color(bg); // clear colour is not encoded, so pass sRGB as is
       lastProject = project;
+      if (viewKind === 'room' && eye && !project.rooms.some((r) => r.id === eye.roomId)) {
+        viewKind = 'overview';
+        eye = null;
+      }
       build(project);
-      if (refit) fitTo(bounds, false);
+      if (refit) {
+        if (viewKind === 'overview') fitTo(bounds, false);
+        else applyView(project);
+      }
       render();
     },
     focusRoom(id) {
       focused = id;
+      if (viewKind === 'room' && id && lastProject) {
+        // standing in a room: walk into the room that was picked
+        eye = { roomId: id, corner: 0 };
+        build(lastProject);
+        applyView(lastProject);
+        render();
+        return;
+      }
       drawOutline();
       if (id && lastProject) {
         const room = lastProject.rooms.find((r) => r.id === id);
@@ -524,11 +646,61 @@ export function createView3D({ THREE, container, onPickRoom }) {
       } else fitTo(bounds);
       render();
     },
+    // Choose a viewpoint. 'room' needs a room; the corner number picks one of its corners.
+    setView(kind, { roomId, corner = 0 } = {}) {
+      if (!lastProject) return;
+      const wasRoom = viewKind === 'room';
+      if (kind === 'room') {
+        const id = roomId || focused || largestRoom(lastProject)?.id;
+        if (!id) return;
+        if (!wasRoom) cutBeforeRoom = cut;
+        cut = false; // full walls around you
+        eye = { roomId: id, corner };
+      } else {
+        if (wasRoom) cut = cutBeforeRoom;
+        eye = null;
+      }
+      viewKind = kind;
+      build(lastProject);
+      applyView(lastProject);
+      render();
+    },
+    nextCorner() {
+      if (viewKind !== 'room' || !eye || !lastProject) return;
+      eye = { ...eye, corner: eye.corner + 1 };
+      applyView(lastProject);
+      render();
+    },
+    get view() {
+      return { kind: viewKind, roomId: eye?.roomId || null, corner: eye?.corner || 0 };
+    },
+    // The current camera, for saving with the project or sending with an AI request.
+    cameraState() {
+      return {
+        kind: viewKind,
+        roomId: eye?.roomId || null,
+        position: { x: camera.position.x, y: camera.position.z, z: camera.position.y },
+        target: { x: ctl.target.x, y: ctl.target.z, z: ctl.target.y },
+        fov: camera.fov,
+      };
+    },
     fit() {
       fitTo(bounds);
     },
     setCut(v) {
       cut = v;
+      if (viewKind === 'room') {
+        // a cutaway is a view from above
+        viewKind = 'overview';
+        eye = null;
+        cut = v;
+        if (lastProject) {
+          build(lastProject);
+          applyView(lastProject);
+        }
+        render();
+        return;
+      }
       if (lastProject) build(lastProject);
       render();
     },

@@ -11,8 +11,10 @@ import { createEstimateStep } from './estimate.js';
 import { h, add, clear, icon, toast, copyText } from './dom.js';
 import { loadPdf } from './libs.js';
 import { createOnboarding, firstVisit } from './onboarding.js';
+import { createFurnitureLibrary } from './furniture-library.js';
 import * as G from '../core/geometry.js';
 import { roomLabel, OPENING_TYPES } from '../core/model.js';
+import { corners, furnitureLabel, roomAt } from '../core/furniture.js';
 
 /* global __SITE__ */ // true only in the lithos.ge build, where file downloads work
 const STEPS = [
@@ -109,9 +111,12 @@ export async function main(root) {
   const redoBtn = h('button', { type: 'button', class: 'btn tool icon-only', title: 'გამეორება (Ctrl+Shift+Z)', 'aria-label': 'გამეორება', onclick: redo }, icon('redo', 18));
   const fitBtn = h('button', { type: 'button', class: 'btn tool icon-only', title: 'მთელი გეგმა ეკრანზე', 'aria-label': 'მთელი გეგმა ეკრანზე', onclick: () => editor.fit() }, icon('fit', 18));
   const uploadBtn = h('button', { type: 'button', class: 'btn tool', title: 'გეგმის ატვირთვა (სურათი ან PDF)', 'aria-label': 'გეგმის ატვირთვა', onclick: () => planInput.click() }, icon('upload', 18), h('span', { class: 'tool-label' }, 'გეგმა'));
+  // Furniture is added from the library (it is not a drawing tool) and seen in 3D.
+  const furnBtn = h('button', { type: 'button', class: 'btn tool', id: 'furniture-btn', title: 'ავეჯის დამატება (F)', 'aria-label': 'ავეჯის დამატება', 'aria-keyshortcuts': 'F', onclick: () => openLibrary() }, icon('sofa', 18), h('span', { class: 'tool-label' }, 'ავეჯი'));
+  const view3dBtn = h('button', { type: 'button', class: 'btn tool', title: '3D ხედი', 'aria-label': '3D ხედი', onclick: () => go('materials') }, icon('cube', 18), h('span', { class: 'tool-label' }, '3D'));
   const toolbar = h('div', { class: 'toolbar', role: 'toolbar', 'aria-label': 'ხელსაწყოები' },
-    h('div', { class: 'tool-group' }, toolBtns),
-    h('div', { class: 'tool-group' }, undoBtn, redoBtn, fitBtn, uploadBtn));
+    h('div', { class: 'tool-group' }, toolBtns, furnBtn),
+    h('div', { class: 'tool-group' }, undoBtn, redoBtn, fitBtn, view3dBtn, uploadBtn));
 
   const hintbar = h('div', { class: 'hintbar', 'aria-live': 'polite' });
   const canvas = h('canvas', { class: 'plan', 'aria-label': 'ბინის გეგმა. გამოიყენე ხელსაწყოები ოთახების დასახაზად.' });
@@ -152,6 +157,7 @@ export async function main(root) {
     canvas,
     hintEl: hintbar,
     onRoomCreated: (room, pt) => showPurposePopover(room, pt),
+    onOpenLibrary: () => openLibrary(),
   });
   if (window.__BINA_DEBUG__) window.__binaEditor = editor;
   const inspector = createInspector({
@@ -159,7 +165,35 @@ export async function main(root) {
     onUpload: () => planInput.click(),
     onStartScale: () => editor.startScale(),
     onNext: () => go('materials'),
+    onOpenLibrary: (roomId) => openLibrary(roomId),
+    onShow3D: () => go('materials'),
   });
+
+  // ---------------------------------------------------------------- furniture library
+  // Pieces go into the room the user is working on: the one named, the selected room (or
+  // the room of the selected piece or door), the room in the middle of the view, or the
+  // largest room.
+  function libraryRoom(explicit) {
+    const p = current();
+    if (explicit && p.rooms.some((r) => r.id === explicit)) return explicit;
+    const sel = state.selection;
+    if (sel?.type === 'room') return sel.id;
+    if (sel?.type === 'furniture') return (p.furniture || []).find((f) => f.id === sel.id)?.roomId;
+    if (sel?.type === 'opening') return p.openings.find((o) => o.id === sel.id)?.roomId;
+    const r = state.step === 'plan' ? roomAt(p.rooms, editor.viewCenter()) : null;
+    if (r) return r.id;
+    return p.rooms.reduce((m, x) => (!m || G.area(x.points) > G.area(m.points) ? x : m), null)?.id;
+  }
+  const library = createFurnitureLibrary({
+    onAdded: () => {
+      if (state.tool !== 'select') setTool('select');
+      canvas.focus({ preventScroll: true });
+    },
+  });
+  function openLibrary(roomId) {
+    if (state.step !== 'plan') go('plan');
+    library.show(libraryRoom(roomId));
+  }
   const materials = createMaterialsStep({ el: matSection, onGoEstimate: () => go('estimate'), onGoPlan: () => go('plan') });
   const estimate = createEstimateStep({ el: estSection, onGoPlan: () => go('plan') });
 
@@ -428,6 +462,9 @@ export async function main(root) {
     } else if (sel?.type === 'opening') {
       const o = p.openings.find((x) => x.id === sel.id);
       if (o) t = OPENING_TYPES[o.type].label;
+    } else if (sel?.type === 'furniture') {
+      const f = (p.furniture || []).find((x) => x.id === sel.id);
+      if (f) t = `${furnitureLabel(f)} · ${Math.round(f.w * 100)} × ${Math.round(f.d * 100)} სმ`;
     }
     sheetTitle.textContent = t;
   }
@@ -464,10 +501,18 @@ export async function main(root) {
         setTimeout(() => {
           const p = current();
           const sel = state.selection;
-          const room = sel && p.rooms.find((r) => r.id === (sel.type === 'room' ? sel.id : p.openings.find((o) => o.id === sel.id)?.roomId));
-          if (!room || getComputedStyle(sheet).position !== 'fixed') return;
+          if (!sel || getComputedStyle(sheet).position !== 'fixed') return;
+          let pts = null;
+          if (sel.type === 'furniture') {
+            const f = (p.furniture || []).find((x) => x.id === sel.id);
+            if (f) pts = corners(f, 0.4); // with room for the handles
+          } else {
+            const room = p.rooms.find((r) => r.id === (sel.type === 'room' ? sel.id : p.openings.find((o) => o.id === sel.id)?.roomId));
+            pts = room?.points;
+          }
+          if (!pts) return;
           const cover = canvas.getBoundingClientRect().bottom - sheet.getBoundingClientRect().top;
-          editor.reveal(room.points, Math.max(0, cover));
+          editor.reveal(pts, Math.max(0, cover));
         }, 260);
       }
       // Nothing selected any more: give the plan its space back.

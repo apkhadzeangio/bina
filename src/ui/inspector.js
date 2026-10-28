@@ -1,20 +1,29 @@
 // Right-hand panel of the plan step: apartment settings, the selected room or opening.
-import { state, current, commit, setSelection, setHoverEdge, subscribe, emit, setPlanImage } from './store.js';
+import { state, current, commit, setSelection, setHoverEdge, subscribe, emit, setPlanImage, setSnap } from './store.js';
 import * as G from '../core/geometry.js';
 import { PURPOSES, PURPOSE_ORDER, OPENING_TYPES, roomLabel, DEFAULT_HEIGHT } from '../core/model.js';
-import { measureRoom, openingHosts, defaultKitchenRun, roomHeight } from '../core/measure.js';
-import { withRoomPoints, updateRoom, deleteRoom, updateOpening, deleteOpening } from '../core/ops.js';
+import { measureRoom, openingHosts, defaultKitchenRun, roomHeight, kitchenRuns } from '../core/measure.js';
+import {
+  withRoomPoints, updateRoom, deleteRoom, updateOpening, deleteOpening,
+  addFurniture, updateFurniture, deleteFurniture, rotateFurniture, duplicateFurniture, resizeFurniture,
+} from '../core/ops.js';
+import { FURNITURE, furnitureLabel } from '../core/furniture.js';
+import { analyzeFurniture, issueLevel, alignToWall, fitRun } from '../core/layout.js';
 import { h, add, clear, icon, fmtNum, fmtArea, fmtLen, parseNum, toast } from './dom.js';
 import { purposeColorVar } from './plan-editor.js';
 
+// A room that becomes a kitchen gets a cabinet run on its best wall, unless it has one.
 export function setRoomPurpose(project, room, purpose) {
   let next = updateRoom(project, room.id, { purpose, unassigned: false });
-  if (PURPOSES[purpose].kitchen && !room.kitchen?.runs?.length) {
+  const hasRun = (next.furniture || []).some((f) => f.type === 'kitchen_run' && f.roomId === room.id);
+  if (PURPOSES[purpose].kitchen && !hasRun) {
     const r = next.rooms.find((x) => x.id === room.id);
-    next = updateRoom(next, room.id, { kitchen: defaultKitchenRun(r, next) });
+    next = addFurniture(next, fitRun(next, r, defaultKitchenRun(r, next).runs[0]));
   }
   return next;
 }
+
+const cm = (m) => fmtNum(m * 100, 0);
 
 export function purposeGrid(selected, onPick, idPrefix = 'pp') {
   return h('div', { class: 'purpose-grid', role: 'radiogroup', 'aria-label': 'ოთახის დანიშნულება' },
@@ -75,7 +84,7 @@ function confirmButton(label, confirmLabel, onConfirm) {
   return b;
 }
 
-export function createInspector({ el, onUpload, onStartScale, onNext }) {
+export function createInspector({ el, onUpload, onStartScale, onNext, onOpenLibrary, onShow3D }) {
   function render() {
     clear(el);
     const p = current();
@@ -83,6 +92,10 @@ export function createInspector({ el, onUpload, onStartScale, onNext }) {
     if (sel?.type === 'room') {
       const room = p.rooms.find((r) => r.id === sel.id);
       if (room) return renderRoom(p, room);
+    }
+    if (sel?.type === 'furniture') {
+      const f = (p.furniture || []).find((x) => x.id === sel.id);
+      if (f) return renderFurniture(p, f);
     }
     if (sel?.type === 'opening') {
       const op = p.openings.find((o) => o.id === sel.id);
@@ -203,6 +216,17 @@ export function createInspector({ el, onUpload, onStartScale, onNext }) {
       }
     }
     if (p.plan && state.planImage && !p.plan.calibrated) out.push({ text: 'გეგმის მასშტაბი არ არის დაყენებული — ზომები არაზუსტი იქნება.' });
+    // furniture: overlaps and pieces in walls first, then missing space; at most six lines
+    const iss = analyzeFurniture(p);
+    const bad = (p.furniture || [])
+      .map((f) => ({ f, list: iss.get(f.id) || [] }))
+      .filter((x) => x.list.length)
+      .sort((a, b) => (issueLevel(a.list) === 'error' ? 0 : 1) - (issueLevel(b.list) === 'error' ? 0 : 1));
+    for (const { f, list } of bad.slice(0, 6)) {
+      const r = p.rooms.find((x) => x.id === f.roomId);
+      out.push({ room: r || true, kind: 'furniture', id: f.id, text: `${r ? `${roomLabel(r, p.rooms)}: ` : ''}${furnitureLabel(f)} — ${list[0].text}` });
+    }
+    if (bad.length > 6) out.push({ text: `და კიდევ ${bad.length - 6} ავეჯის შენიშვნა` });
     return out;
   }
 
@@ -286,10 +310,12 @@ export function createInspector({ el, onUpload, onStartScale, onNext }) {
         h('div', { class: 'kv' }, h('span', null, 'ჰიდროიზოლაცია'), h('b', { class: 'num' }, fmtArea(m.waterproofArea))));
     }
     if (purpose.kitchen) {
-      const runs = room.kitchen?.runs || [];
+      const runs = kitchenRuns(room, p);
+      // Cabinet runs are furniture; these switches add or remove a run along a wall.
+      const runsOn = (cur, i) => kitchenRuns(cur.rooms.find((x) => x.id === room.id), cur).filter((r) => r.edge === i);
       extra = h('section', { class: 'card-sec' },
         h('div', { class: 'sec-title' }, 'სამზარეულოს ავეჯი'),
-        h('p', { class: 'muted small' }, 'მონიშნე კედლები, რომლებზეც სამუშაო ზედაპირი და ქვედა კარადები დგას. სიგრძე კედლის დასაწყისიდან ითვლება.'),
+        h('p', { class: 'muted small' }, 'მონიშნე კედლები, რომლებზეც ქვედა კარადები და სამუშაო ზედაპირი დგას. გეგმაზე კარადები სხვა ავეჯივით გადაიტანება და ზომა ეცვლება.'),
         h('div', { class: 'run-list' }, es.map((e) => {
           const run = runs.find((r) => r.edge === e.i);
           const box = h('input', {
@@ -299,19 +325,25 @@ export function createInspector({ el, onUpload, onStartScale, onNext }) {
             onchange: (ev) => {
               const cur = current();
               const r = cur.rooms.find((x) => x.id === room.id);
-              const list = (r.kitchen?.runs || []).filter((x) => x.edge !== e.i);
-              if (ev.target.checked) list.push({ edge: e.i, start: 0, length: Math.min(e.len, 3.6) });
-              commit(updateRoom(cur, room.id, { kitchen: { runs: list.sort((a, b) => a.edge - b.edge) } }));
+              if (ev.target.checked) {
+                commit(addFurniture(cur, fitRun(cur, r, { edge: e.i, start: 0, length: Math.min(e.len, 3.6) })));
+              } else {
+                const ids = new Set(runsOn(cur, e.i).map((x) => x.id));
+                commit({ ...cur, furniture: cur.furniture.filter((f) => !ids.has(f.id)) });
+              }
             },
           });
-          const len = h('input', { id: `run-len-${e.i}`, class: 'num-in', type: 'text', inputmode: 'decimal', disabled: !run, value: run ? fmtNum(Math.min(run.length, e.len), 2) : '', 'aria-label': `კედელი ${e.i + 1}, ავეჯის სიგრძე` });
+          const len = h('input', { id: `run-len-${e.i}`, class: 'num-in', type: 'text', inputmode: 'decimal', disabled: !run, value: run ? fmtNum(run.length, 2) : '', 'aria-label': `კედელი ${e.i + 1}, ავეჯის სიგრძე` });
           len.addEventListener('change', () => {
             const v = parseNum(len.value);
-            if (!(v > 0.2)) return;
             const cur = current();
-            const r = cur.rooms.find((x) => x.id === room.id);
-            const list = (r.kitchen?.runs || []).map((x) => (x.edge === e.i ? { ...x, length: Math.min(v, e.len) } : x));
-            commit(updateRoom(cur, room.id, { kitchen: { runs: list } }));
+            const [r0] = runsOn(cur, e.i);
+            if (!(v > 0.2) || !r0) return;
+            const f = cur.furniture.find((x) => x.id === r0.id);
+            const L = Math.min(v, e.len - r0.start);
+            // keep the start of the run, grow or shrink along the wall
+            const t = r0.start + L / 2;
+            commit(updateFurniture(cur, f.id, { w: L, x: e.a.x + e.ux * t + e.nx * f.d / 2, y: e.a.y + e.uy * t + e.ny * f.d / 2 }));
           });
           const row = h('div', { class: 'run-row' },
             h('label', { class: 'check', for: `run-${e.i}` }, box, ` კედელი ${e.i + 1}`, h('span', { class: 'muted num' }, ` · ${fmtNum(e.len, 2)} მ`)),
@@ -323,6 +355,22 @@ export function createInspector({ el, onUpload, onStartScale, onNext }) {
         h('div', { class: 'kv' }, h('span', null, 'სამუშაო ზედაპირი'), h('b', { class: 'num' }, fmtArea(m.countertopArea))),
         h('div', { class: 'kv' }, h('span', null, 'ფარტუხი'), h('b', { class: 'num' }, fmtArea(m.backsplashArea))));
     }
+
+    // furniture standing in the room
+    const iss = analyzeFurniture(p);
+    const items = (p.furniture || []).filter((f) => f.roomId === room.id);
+    const furnSec = h('section', { class: 'card-sec' },
+      h('div', { class: 'sec-title' }, `ავეჯი (${items.length})`),
+      items.length ? h('div', { class: 'room-list' }, items.map((f) => {
+        const level = issueLevel(iss.get(f.id));
+        return h('button', { type: 'button', class: 'room-row', onclick: () => setSelection({ type: 'furniture', id: f.id }) },
+          h('span', { class: `f-dot${level ? ` ${level}` : ''}`, 'aria-hidden': 'true' }),
+          h('span', { class: 'room-name' }, furnitureLabel(f), level ? h('span', { class: 'sr-only' }, ' (შენიშვნა)') : null),
+          h('span', { class: 'num' }, `${cm(f.w)} × ${cm(f.d)}`));
+      })) : h('p', { class: 'muted small' }, 'ოთახში ჯერ ავეჯი არ არის. დაამატე, რომ 3D-ში და AI-სთვის ოთახი სრულად გამოჩნდეს.'),
+      h('div', { class: 'btn-row' },
+        h('button', { type: 'button', class: 'btn btn-sm btn-accent', onclick: () => onOpenLibrary?.(room.id) }, icon('plus', 16), 'ავეჯის დამატება'),
+        items.length ? h('button', { type: 'button', class: 'btn btn-sm', onclick: () => onShow3D?.() }, icon('cube', 16), '3D ხედი') : null));
 
     add(el, 
       h('div', { class: 'insp-head' },
@@ -341,8 +389,96 @@ export function createInspector({ el, onUpload, onStartScale, onNext }) {
         h('div', { class: 'sec-title' }, 'კედლები'),
         h('p', { class: 'muted small' }, 'ჩაწერე ზუსტი სიგრძე გეგმიდან. მომდევნო კედელი გადაიწევს, კუთხეები შენარჩუნდება.'),
         walls),
+      furnSec,
       extra,
       purpose.outdoor ? null : heightBox,
+    );
+  }
+
+  // ---------------------------------------------------------------- furniture
+  function renderFurniture(p, f) {
+    const def = FURNITURE[f.type];
+    const room = p.rooms.find((r) => r.id === f.roomId);
+    const list = analyzeFurniture(p).get(f.id) || [];
+    const id = f.id;
+    const sizeField = (fid, label, key, lo, hi) => numField({
+      id: fid, label, value: f[key] * 100, unit: 'სმ', digits: 0,
+      onCommit: (v) => {
+        if (!(v >= lo && v <= hi)) {
+          toast(`${label}: ${lo}–${hi} სმ`, 'warn');
+          return false;
+        }
+        commit(resizeFurniture(current(), id, { [key]: v / 100 }));
+        return true;
+      },
+    });
+    const presets = def.presets || [];
+    const toggle = (fid, label, key) => h('label', { class: 'check' },
+      h('input', { type: 'checkbox', id: fid, checked: state.snap[key], onchange: (ev) => setSnap({ [key]: ev.target.checked }) }), ` ${label}`);
+
+    add(el,
+      h('div', { class: 'insp-head' },
+        h('button', {
+          type: 'button', class: 'btn btn-ghost btn-sm back',
+          onclick: () => setSelection(room ? { type: 'room', id: room.id } : null),
+        }, `← ${room ? roomLabel(room, p.rooms) : 'ბინა'}`),
+        h('button', { type: 'button', class: 'btn btn-ghost btn-sm danger', id: 'f-delete', onclick: () => {
+          commit(deleteFurniture(current(), id));
+          setSelection(room ? { type: 'room', id: room.id } : null);
+          toast(`${def.label} წაიშალა. დაბრუნება — Ctrl+Z`, 'info');
+        } }, icon('trash', 16), 'წაშლა')),
+      h('h2', { class: 'room-title' }, def.label),
+      h('p', { class: 'muted' }, room ? `${roomLabel(room, p.rooms)} · ${cm(f.w)} × ${cm(f.d)} სმ, სიმაღლე ${cm(f.h)} სმ` : 'ოთახის გარეთ'),
+      list.length ? h('section', { class: 'card-sec warn-sec' },
+        h('div', { class: 'sec-title' }, 'შესამოწმებელი'),
+        h('ul', { class: 'warn-list' }, list.map((w) => h('li', { class: w.level }, w.other
+          ? h('button', { type: 'button', class: 'link', onclick: () => setSelection({ type: 'furniture', id: w.other }) }, w.text)
+          : w.text)))) : null,
+      h('section', { class: 'card-sec' },
+        h('div', { class: 'sec-title' }, 'ზომა'),
+        presets.length ? h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'გავრცელებული ზომები' }, presets.map(([w, d]) => {
+          const on = Math.abs(f.w - w) < 0.005 && Math.abs(f.d - d) < 0.005;
+          return h('button', {
+            type: 'button', class: `seg-btn${on ? ' on' : ''}`, role: 'radio', 'aria-checked': on ? 'true' : 'false',
+            onclick: () => commit(resizeFurniture(current(), id, { w, d })),
+          }, `${cm(w)}×${cm(d)}`);
+        })) : null,
+        h('div', { class: 'field-grid field-grid-3' },
+          sizeField('f-w', 'სიგანე', 'w', 20, 1000),
+          sizeField('f-d', 'სიღრმე', 'd', 20, 1000),
+          sizeField('f-h', 'სიმაღლე', 'h', 5, 400))),
+      h('section', { class: 'card-sec' },
+        h('div', { class: 'sec-title' }, 'მობრუნება და ადგილი'),
+        h('div', { class: 'btn-row' },
+          h('button', { type: 'button', class: 'btn btn-sm', id: 'f-rot-l', 'aria-label': 'მობრუნება 90° საათის ისრის საწინააღმდეგოდ', onclick: () => commit(rotateFurniture(current(), id, -90)) }, icon('rotateL', 16), '90°'),
+          h('button', { type: 'button', class: 'btn btn-sm', id: 'f-rot-r', 'aria-label': 'მობრუნება 90° საათის ისრის მიმართულებით', onclick: () => commit(rotateFurniture(current(), id, 90)) }, icon('rotate', 16), '90°'),
+          numField({
+            id: 'f-rot', label: 'კუთხე', value: f.rot, unit: '°', digits: 0,
+            onCommit: (v) => {
+              if (!Number.isFinite(v)) return false;
+              commit(updateFurniture(current(), id, { rot: v }));
+              return true;
+            },
+          })),
+        h('div', { class: 'btn-row' },
+          h('button', { type: 'button', class: 'btn btn-sm', id: 'f-wall', onclick: () => {
+            const next = alignToWall(current(), (current().furniture || []).find((x) => x.id === id));
+            if (next) commit(updateFurniture(current(), id, next));
+            else toast('ამ ნივთისთვის საკმარისად გრძელი კედელი ვერ ვიპოვე.', 'warn');
+          } }, icon('wall', 16), 'კედელთან მიდგმა'),
+          h('button', { type: 'button', class: 'btn btn-sm', id: 'f-dup', onclick: () => {
+            const r = duplicateFurniture(current(), id);
+            commit(r.project);
+            setSelection({ type: 'furniture', id: r.id });
+          } }, icon('copy', 16), 'ასლი')),
+        h('div', { class: 'snap-row' },
+          toggle('f-snap-walls', 'კედლებზე მიკვრა', 'walls'),
+          toggle('f-snap-grid', 'ბადე 10 სმ', 'grid')),
+        h('p', { class: 'muted small' }, 'გეგმაზე გადაათრიე ნივთი, წინა მრგვალი სახელურით მოაბრუნე, გვერდის კვადრატებით ზომა შეცვალე.',
+          h('span', { class: 'kbd-only' }, ' ისრები — 1 სმ, Ctrl+D — ასლი.'))),
+      h('div', { class: 'btn-row' },
+        h('button', { type: 'button', class: 'btn btn-sm', onclick: () => onOpenLibrary?.(room?.id) }, icon('plus', 16), 'სხვა ავეჯის დამატება'),
+        h('button', { type: 'button', class: 'btn btn-sm', onclick: () => onShow3D?.() }, icon('cube', 16), '3D ხედი')),
     );
   }
 
@@ -412,7 +548,7 @@ export function createInspector({ el, onUpload, onStartScale, onNext }) {
 
   subscribe((kind) => {
     if (state.step !== 'plan') return;
-    if (['project', 'selection', 'image'].includes(kind)) {
+    if (['project', 'selection', 'image', 'snap'].includes(kind)) {
       const active = document.activeElement;
       const keepId = active && el.contains(active) ? active.id : null;
       render();

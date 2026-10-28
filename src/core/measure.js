@@ -2,6 +2,7 @@
 // kitchen and wet-room areas. Everything here is a pure function of the project.
 import { area, perimeter, edges, edge } from './geometry.js';
 import { PURPOSES, OPENING_TYPES, DEFAULT_HEIGHT } from './model.js';
+import { wallRuns, islandRuns } from './furniture.js';
 
 // Assumptions used by the measurements. Shown to the user on the estimate page.
 export const GEOMETRY_RULES = {
@@ -87,19 +88,12 @@ function openingFloorWidth(item, len) {
   return Math.max(0, b - a);
 }
 
-export function kitchenRuns(room) {
+// Kitchen base cabinets standing against the walls of a kitchen, as wall stretches
+// { edge, start, length, id }. They come from the furniture of type kitchen_run.
+export function kitchenRuns(room, project) {
   const p = PURPOSES[room.purpose];
   if (!p || !p.kitchen) return [];
-  const n = room.points.length;
-  const runs = (room.kitchen?.runs || [])
-    .filter((r) => r.edge >= 0 && r.edge < n && r.length > 0)
-    .map((r) => {
-      const len = edge(room.points, r.edge).len;
-      const start = Math.max(0, Math.min(len, r.start || 0));
-      return { edge: r.edge, start, length: Math.min(r.length, len - start) };
-    })
-    .filter((r) => r.length > 0.05);
-  return runs;
+  return wallRuns(room, project?.furniture);
 }
 
 // Pick the longest wall without a floor-level opening as the default kitchen run.
@@ -186,7 +180,7 @@ export function measureRoom(room, project, hostsInfo) {
   }
 
   if (p.kitchen) {
-    const runs = kitchenRuns(room);
+    const runs = kitchenRuns(room, project);
     let runLen = 0;
     let splash = 0;
     for (const r of runs) {
@@ -210,7 +204,9 @@ export function measureRoom(room, project, hostsInfo) {
     m.kitchenRunLength = runLen;
     m.backsplashArea = Math.min(splash, m.wallPaintArea);
     m.wallPaintArea = Math.max(0, m.wallPaintArea - m.backsplashArea);
-    m.countertopArea = Math.max(0, G.counterDepth * (runLen - G.counterDepth * corners));
+    // A kitchen island: a top over the whole cabinet plus a small overhang.
+    const island = islandRuns(room, project.furniture).reduce((sum, f) => sum + f.w * (f.d + G.counterDepth - 0.6), 0);
+    m.countertopArea = Math.max(0, G.counterDepth * (runLen - G.counterDepth * corners)) + island;
   }
 
   if (p.surfaces.skirting) {
@@ -220,7 +216,9 @@ export function measureRoom(room, project, hostsInfo) {
     m.waterproofArea = A + P * G.waterproofUpturn;
   }
   if (p.surfaces.vanity) {
-    m.vanityArea = G.vanityLength * G.vanityDepth;
+    // The stone top of the vanity units drawn in the room, or one standard unit.
+    const units = (project.furniture || []).filter((f) => f.type === 'vanity' && f.roomId === room.id);
+    m.vanityArea = units.length ? units.reduce((sum, f) => sum + f.w * f.d, 0) : G.vanityLength * G.vanityDepth;
   }
 
   for (const ei of edgeInfo) {
