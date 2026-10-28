@@ -338,6 +338,11 @@ export function createView3D({ THREE, container, onPickRoom }) {
     const mats = {
       plain: plainMat,
       cabinet,
+      // Kitchen base cabinets wear the front finish chosen for their room.
+      front(room, len) {
+        const m = room ? resolveMaterial(p, room, 'cabinet').material : null;
+        return m ? matFor(m, { repeatW: len, repeatH: 0.76 }) : cabinet;
+      },
       pal,
       top(room, surface, len, depth) {
         const m = room ? resolveMaterial(p, room, surface).material : null;

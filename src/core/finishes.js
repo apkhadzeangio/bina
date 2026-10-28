@@ -14,6 +14,7 @@ export const SURFACES = {
   vanity: { label: 'ნიჟარის ზედაპირი', cats: () => ['stone'] },
   skirting: { label: 'პლინტუსი', cats: () => ['skirting'] },
   sanitary: { label: 'სანტექნიკა', cats: (p) => [p.surfaces.sanitary] },
+  cabinet: { label: 'კარადის ფასადები', cats: () => ['cabinet_front'] },
 };
 
 export const GLOBAL_SURFACES = {
@@ -21,7 +22,10 @@ export const GLOBAL_SURFACES = {
   sill: { label: 'ფანჯრის რაფები', cats: () => ['stone'] },
 };
 
-export const SURFACE_ORDER = ['floor', 'walls', 'walls_upper', 'backsplash', 'countertop', 'vanity', 'ceiling', 'skirting', 'sanitary'];
+export const SURFACE_ORDER = ['floor', 'walls', 'walls_upper', 'backsplash', 'countertop', 'cabinet', 'vanity', 'ceiling', 'skirting', 'sanitary'];
+
+// Surfaces that are chosen for the look only and are not part of the purchase list.
+export const UNPRICED_SURFACES = new Set(['cabinet']);
 
 // The category a surface uses by default in a room of this purpose.
 export function defaultCat(purposeKey, surface, tier) {
@@ -68,6 +72,7 @@ export function allowedCats(room, surface) {
 // Apply a material choice. scope: 'all' (every surface of this kind) or 'room'.
 export function setFinish(project, room, surface, materialId, scope) {
   const finish = {
+    ...project.finish,
     global: { ...(project.finish?.global || {}) },
     rooms: { ...(project.finish?.rooms || {}) },
   };
@@ -98,4 +103,44 @@ export function clearRoomFinish(project, roomId, surface) {
     rooms[roomId] = next;
   }
   return { ...project, finish: { ...project.finish, rooms } };
+}
+
+// Every surface a material category can be used on (for the product record and filters).
+export function surfacesForCat(cat) {
+  const out = new Set();
+  for (const [k, p] of Object.entries(PURPOSES)) {
+    for (const s of Object.keys(SURFACES)) {
+      if (s !== 'walls_upper' && !p.surfaces[s]) continue;
+      if (s === 'walls_upper' && !p.wet) continue;
+      if (SURFACES[s].cats(p).includes(cat)) out.add(s);
+    }
+    void k;
+  }
+  for (const [s, g] of Object.entries(GLOBAL_SURFACES)) if (g.cats().includes(cat)) out.add(s);
+  return [...out];
+}
+
+// ---------------------------------------------------------------- reference settings
+// How strictly a chosen finish must be followed by the interior render, and which way
+// planks run. Stored per surface: finish.refs['<roomId or *>|<surface>'].
+//   mandatory: true  → use exactly this product/colour; false → it may be adjusted.
+//   orientation: 'auto' | 'along' | 'across' → relative to the room's longest wall.
+export const refKey = (room, surface) => `${room ? room.id : '*'}|${surface}`;
+
+export function refPrefs(project, room, surface) {
+  const saved = project.finish?.refs?.[refKey(room, surface)] || {};
+  const { source } = resolveMaterial(project, room, surface);
+  return {
+    // A finish the user picked is binding by default; one filled in by the style is not.
+    mandatory: typeof saved.mandatory === 'boolean' ? saved.mandatory : source === 'room' || source === 'global',
+    orientation: ['along', 'across'].includes(saved.orientation) ? saved.orientation : 'auto',
+    explicit: typeof saved.mandatory === 'boolean',
+  };
+}
+
+export function setRefPrefs(project, room, surface, patch) {
+  const refs = { ...(project.finish?.refs || {}) };
+  const key = refKey(room, surface);
+  refs[key] = { ...(refs[key] || {}), ...patch };
+  return { ...project, finish: { ...project.finish, refs } };
 }

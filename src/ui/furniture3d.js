@@ -128,7 +128,7 @@ export function buildFurniture(THREE, f, room, mats) {
     }
     case 'kitchen_run': {
       box(w, 0.1, d - 0.06, M(P.dark), 0, 0.05, -0.03);
-      box(w, 0.76, d, mats.cabinet, 0, 0.1 + 0.38, 0);
+      box(w, 0.76, d, mats.front ? mats.front(room, w) : mats.cabinet, 0, 0.1 + 0.38, 0);
       gaps(Math.max(1, Math.round(w / 0.6)), 0.7, 0.48, M(P.dark));
       box(w, 0.04, d + 0.02, mats.top(room, 'countertop', w, d + 0.02), 0, 0.88, 0.01);
       break;
@@ -149,7 +149,7 @@ export function buildFurniture(THREE, f, room, mats) {
     }
     case 'sink': {
       box(w, 0.1, d - 0.06, M(P.dark), 0, 0.05, -0.03);
-      box(w, 0.76, d, mats.cabinet, 0, 0.48, 0);
+      box(w, 0.76, d, mats.front ? mats.front(room, w) : mats.cabinet, 0, 0.48, 0);
       gaps(2, 0.7, 0.48, M(P.dark));
       box(w, 0.04, d + 0.02, mats.top(room, 'countertop', w, d + 0.02), 0, 0.88, 0.01);
       box(Math.max(0.1, w - 0.2), 0.012, Math.max(0.1, d - 0.22), M(P.metal, { roughness: 0.25 }), 0, 0.903, 0.01);

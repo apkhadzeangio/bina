@@ -2,6 +2,9 @@
 import { state, current, subscribe } from './store.js';
 import { PURPOSES, roomLabel } from '../core/model.js';
 import { MATERIAL_LIST, CATEGORIES, UNITS, SHOPS, PRICES_CHECKED, priceLabel, shopLabel, CATALOG_NOTE } from '../core/catalog.js';
+import { product, VERIFICATION } from '../core/products.js';
+import { provenanceBadges } from './material-board.js';
+import { PURPOSES as PURPOSES_ALL } from '../core/model.js';
 import { computeEstimate, CONSUMPTION } from '../core/quantities.js';
 import { GEOMETRY_RULES } from '../core/measure.js';
 import { SURFACES, GLOBAL_SURFACES } from '../core/finishes.js';
@@ -43,11 +46,13 @@ function whereLabel(l, p) {
 }
 
 export function estimateTSV(est, p) {
-  const rows = [['ჯგუფი', 'მასალა', 'სპეციფიკაცია', 'სად', 'საჭირო', 'შესაძენი', 'ერთეულის ფასი', 'ჯამი, ₾', 'მაღაზია', 'ბმული', 'შენიშვნა']];
+  const rows = [['ჯგუფი', 'მასალა', 'სპეციფიკაცია', 'სად', 'საჭირო', 'შესაძენი', 'ერთეულის ფასი', 'ჯამი, ₾', 'მაღაზია', 'ბმული', 'შენიშვნა', 'პროდუქტის ID', 'სტატუსი', 'ფასის თარიღი']];
   for (const g of est.groups) {
     for (const l of g.lines) {
       const m = l.material;
-      rows.push([g.label, m.name, m.spec, whereLabel(l, p), netLabel(l), buyLabel(l), priceLabel(m), Math.round(l.cost), shopLabel(m), m.source?.url || '', m.source?.note || '']);
+      const pr = product(m.id);
+      rows.push([g.label, m.name, m.spec, whereLabel(l, p), netLabel(l), buyLabel(l), priceLabel(m), Math.round(l.cost), shopLabel(m), m.source?.url || '', m.source?.note || '',
+        m.id, VERIFICATION[pr.verification.status].label, pr.price?.checked || '']);
     }
   }
   rows.push(['', '', '', '', '', '', 'სულ', Math.round(est.total), '', '', `ფასები: ${PRICES_CHECKED}`]);
@@ -101,7 +106,8 @@ export function createEstimateStep({ el, onGoPlan }) {
         h('div', { class: 'est-total' },
           h('div', { class: 'eyebrow' }, 'მასალების სავარაუდო ღირებულება'),
           h('div', { class: 'total num' }, fmtMoney(est.total)),
-          h('p', { class: 'muted small' }, 'სამუშაო არ შედის, გარდა ჭიმვადი და თაბაშირ-მუყაოს ჭერისა, რომელთა ფასი მონტაჟით არის. ქვის ფასს ჭრა და მონტაჟი ემატება. ', CATALOG_NOTE)),
+          h('p', { class: 'muted small' }, 'სამუშაო არ შედის, გარდა ჭიმვადი და თაბაშირ-მუყაოს ჭერისა, რომელთა ფასი მონტაჟით არის. ქვის ფასს ჭრა და მონტაჟი ემატება. ',
+            p.rooms.some((r) => PURPOSES_ALL[r.purpose]?.kitchen) ? 'სამზარეულოს კარადები და მათი ფასადები არ შედის: ისინი შეკვეთით მზადდება. ' : '', CATALOG_NOTE)),
         h('div', { class: 'metrics' },
           metric('საცხოვრებელი ფართი', fmtArea(T.interiorArea)),
           T.outdoorArea > 0 ? metric('აივანი / ლოჯია', fmtArea(T.outdoorArea)) : null,
@@ -133,7 +139,8 @@ export function createEstimateStep({ el, onGoPlan }) {
           h('td', null,
             h('div', { class: 'cell-name' }, m.name),
             h('div', { class: 'cell-spec' }, m.spec),
-            m.source?.note ? h('div', { class: 'cell-note' }, m.source.note) : null),
+            m.source?.note ? h('div', { class: 'cell-note' }, m.source.note) : null,
+            provenanceBadges(product(m.id), { compact: true })),
           h('td', { class: 'cell-where' }, whereLabel(l, p)),
           h('td', { class: 'num' }, netLabel(l)),
           h('td', { class: 'num' }, buyLabel(l)),

@@ -2,7 +2,9 @@
 import { state, current, commit, subscribe } from './store.js';
 import * as G from '../core/geometry.js';
 import { PURPOSES, roomLabel } from '../core/model.js';
-import { STYLES, STYLE_ORDER, TIERS, TIER_ORDER, CATEGORIES, MATERIALS, materialsInCats, pick, priceLabel, shopLabel, CATALOG_NOTE } from '../core/catalog.js';
+import { STYLES, STYLE_ORDER, TIERS, TIER_ORDER, CATEGORIES, SHOPS, materialsInCats, pick, priceLabel, shopLabel, CATALOG_NOTE } from '../core/catalog.js';
+import { product, COLOR_FAMILIES, VERIFICATION } from '../core/products.js';
+import { createBoard, provenanceBadges, sampleTile, exportReferences } from './material-board.js';
 import { SURFACES, GLOBAL_SURFACES, resolveMaterial, roomSurfaces, allowedCats, setFinish, clearRoomFinish, globalKey } from '../core/finishes.js';
 import { measureProject } from '../core/measure.js';
 import { computeEstimate } from '../core/quantities.js';
@@ -27,6 +29,7 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
   const panel = h('div', { class: 'mat-panel' });
   const totalBar = h('div', { class: 'total-bar' });
   const dialog = h('dialog', { class: 'picker', id: 'picker' });
+  const board = createBoard({ onChange: (room, surface) => openPicker(room, surface) });
   add(el, 
     h('div', { class: 'mat-layout' },
       h('div', { class: 'view-col' },
@@ -150,7 +153,8 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
     h('span', { class: 'mat-txt' },
       h('span', { class: 'mat-surface' }, label, source === 'room' ? h('span', { class: 'chip' }, 'მხოლოდ აქ') : source === 'global' ? h('span', { class: 'chip chip-soft' }, 'შენი არჩევანი') : null),
       h('span', { class: 'mat-name' }, material.name),
-      h('span', { class: 'mat-spec' }, `${material.spec} · ${priceLabel(material)} · ${shopLabel(material)}`)),
+      h('span', { class: 'mat-spec' }, `${material.spec} · ${priceLabel(material)}${material.source ? ` · ${shopLabel(material)}` : ''}`),
+      provenanceBadges(product(material.id), { compact: true })),
     h('span', { class: 'mat-change' }, 'შეცვლა'));
     return row;
   }
@@ -210,9 +214,16 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
     const globalRows = [];
     if (measured.totals.doorCount > 0) globalRows.push(materialRow({ room: null, surface: 'door', label: `${GLOBAL_SURFACES.door.label} · ${measured.totals.doorCount} ც`, project: p }));
     if (measured.totals.windowCount > 0) globalRows.push(materialRow({ room: null, surface: 'sill', label: `${GLOBAL_SURFACES.sill.label} · ${measured.totals.windowCount} ც`, project: p }));
+    add(panel, h('section', { class: 'mat-sec refs-sec' },
+      h('div', { class: 'refs-txt' },
+        h('b', null, 'AI რენდერის რეფერენსები'),
+        h('span', { class: 'muted small' }, 'თითოეული ზედაპირის პროდუქტი, ფერი, მასშტაბი და რამდენად სავალდებულოა. ოთახის დაფა — „დაფა“ ღილაკით.')),
+      h('button', { type: 'button', class: 'btn btn-sm', onclick: () => exportReferences(null) }, icon('download', 16), 'ექსპორტი')));
     if (globalRows.length) {
       add(panel, h('section', { class: 'mat-sec room-sec' },
-        h('h3', { class: 'room-h' }, 'მთელი ბინა'),
+        h('div', { class: 'room-head' },
+          h('h3', { class: 'room-h' }, 'მთელი ბინა'),
+          h('button', { type: 'button', class: 'btn btn-ghost btn-sm', onclick: () => board.open(null) }, icon('layers', 16), 'დაფა')),
         h('div', { class: 'rows' }, globalRows)));
     }
 
@@ -226,18 +237,22 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
         if (s === 'walls_upper') label += ` · ${fmtArea(m.wallPaintArea, 1)}`;
         if (s === 'backsplash') label += ` · ${fmtArea(m.backsplashArea, 1)}`;
         if (s === 'countertop') label += ` · ${fmtArea(m.countertopArea, 2)}`;
+        if (s === 'cabinet') label += ' · ფასი არ ითვლება';
         return materialRow({ room, surface: s, label, project: p });
       });
       add(panel, h('section', { class: `mat-sec room-sec${focusRoom === room.id ? ' focus' : ''}`, 'data-room': room.id },
-        h('button', {
-          type: 'button',
-          class: 'room-h as-btn',
-          onclick: () => { focusRoom = room.id; view?.focusRoom(room.id); syncView(); renderCaption(); markFocus(); },
-        },
-        h('span', { class: 'dot', style: { background: `var(${purposeColorVar(room.purpose)})` } }),
-        roomLabel(room, p.rooms),
-        h('span', { class: 'muted num' }, fmtArea(m.area, 1)),
-        icon('focus', 16)),
+        h('div', { class: 'room-head' },
+          h('button', {
+            type: 'button',
+            class: 'room-h as-btn',
+            title: '3D-ში ამ ოთახის ჩვენება',
+            onclick: () => { focusRoom = room.id; view?.focusRoom(room.id); syncView(); renderCaption(); markFocus(); },
+          },
+          h('span', { class: 'dot', style: { background: `var(${purposeColorVar(room.purpose)})` } }),
+          roomLabel(room, p.rooms),
+          h('span', { class: 'muted num' }, fmtArea(m.area, 1)),
+          icon('focus', 16)),
+          h('button', { type: 'button', class: 'btn btn-ghost btn-sm board-btn', 'aria-label': `${roomLabel(room, p.rooms)}: მასალების დაფა`, onclick: () => board.open(room.id) }, icon('layers', 16), 'დაფა')),
         h('div', { class: 'rows' }, rows)));
     }
     add(panel, h('p', { class: 'muted small note' }, CATALOG_NOTE));
@@ -252,11 +267,22 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
 
   // ---------------------------------------------------------------- picker
   let pickerState = null;
+  // Picker filters. They are kept when the same surface is opened again, and start fresh on
+  // another surface: a filter carried over silently (e.g. "verified only" from the floor to
+  // the countertop) would hide products without the user knowing why.
+  const NO_FILTERS = { tier: 'all', color: 'all', style: 'all', shop: 'all', verified: false };
+  let filters = { ...NO_FILTERS };
+  let filtersFor = null;
   function openPicker(room, surface) {
     const p = current();
     const cats = allowedCats(room, surface);
     const { material: cur, source } = resolveMaterial(p, room, surface);
     pickerState = { room, surface, scope: source === 'room' ? 'room' : 'all', cat: cur && cats.includes(cur.cat) ? cur.cat : cats[0] };
+    const fkey = `${room ? room.id : '*'}|${surface}`;
+    if (fkey !== filtersFor) {
+      filters = { ...NO_FILTERS };
+      filtersFor = fkey;
+    }
     renderPicker();
     if (typeof dialog.showModal === 'function') dialog.showModal();
     else dialog.setAttribute('open', '');
@@ -281,11 +307,51 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
     const surfLabel = room ? SURFACES[surface].label : GLOBAL_SURFACES[surface].label;
     const where = room ? roomLabel(room, p.rooms) : 'მთელი ბინა';
 
-    const list = materialsInCats([pickerState.cat]).slice().sort((a, b) => {
+    const all = materialsInCats([pickerState.cat]).slice().sort((a, b) => {
       const sa = a.styles.includes(p.style) ? 0 : 1;
       const sb = b.styles.includes(p.style) ? 0 : 1;
-      return sa - sb || TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier) || a.price - b.price;
+      return sa - sb || TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier) || (a.price ?? 0) - (b.price ?? 0);
     });
+    const f = filters;
+    const list = all.filter((m) => {
+      const pr = product(m.id);
+      if (f.tier !== 'all' && m.tier !== f.tier) return false;
+      if (f.color !== 'all' && pr.color.family !== f.color) return false;
+      if (f.style !== 'all' && !m.styles.includes(f.style)) return false;
+      if (f.shop !== 'all' && m.source?.shop !== f.shop) return false;
+      if (f.verified && pr.verification.status !== 'verified') return false;
+      return true;
+    });
+    // Only offer filter values that exist in this category.
+    const has = (fn) => new Set(all.map(fn));
+    const tiers = has((m) => m.tier);
+    const colors = has((m) => product(m.id).color.family);
+    const styles = new Set(all.flatMap((m) => m.styles));
+    const shops = has((m) => m.source?.shop);
+    const chip = (key, value, label) => h('button', {
+      type: 'button',
+      class: `fchip${f[key] === value ? ' on' : ''}`,
+      'aria-pressed': f[key] === value ? 'true' : 'false',
+      onclick: () => { filters = { ...filters, [key]: value }; renderPicker(); },
+    }, label);
+    const anyFilter = f.tier !== 'all' || f.color !== 'all' || f.style !== 'all' || f.shop !== 'all' || f.verified;
+    const filterBar = h('div', { class: 'filters', role: 'group', 'aria-label': 'ფილტრები' },
+      h('div', { class: 'frow' }, h('span', { class: 'flabel' }, 'ბიუჯეტი'), chip('tier', 'all', 'ყველა'),
+        TIER_ORDER.filter((t) => tiers.has(t)).map((t) => chip('tier', t, TIERS[t].label))),
+      colors.size > 1 ? h('div', { class: 'frow' }, h('span', { class: 'flabel' }, 'ფერი'), chip('color', 'all', 'ყველა'),
+        Object.keys(COLOR_FAMILIES).filter((c) => colors.has(c)).map((c) => chip('color', c, COLOR_FAMILIES[c].label))) : null,
+      styles.size ? h('div', { class: 'frow' }, h('span', { class: 'flabel' }, 'სტილი'), chip('style', 'all', 'ყველა'),
+        STYLE_ORDER.filter((st) => styles.has(st)).map((st) => chip('style', st, STYLES[st].label))) : null,
+      h('div', { class: 'frow' },
+        shops.size > 1 || (shops.size === 1 && !shops.has(undefined)) ? h('label', { class: 'field-in' }, h('span', { class: 'flabel' }, 'მაღაზია'),
+          h('select', { class: 'unit-sel', 'aria-label': 'მაღაზია', onchange: (e) => { filters = { ...filters, shop: e.target.value }; renderPicker(); } },
+            h('option', { value: 'all', selected: f.shop === 'all' }, 'ყველა'),
+            [...shops].filter(Boolean).map((k) => h('option', { value: k, selected: f.shop === k }, SHOPS[k]?.label || k)))) : null,
+        h('label', { class: 'check', title: VERIFICATION.verified.desc },
+          h('input', { type: 'checkbox', checked: f.verified, onchange: (e) => { filters = { ...filters, verified: e.target.checked }; renderPicker(); } }),
+          ' მხოლოდ გადამოწმებული'),
+        h('span', { class: 'muted small fcount', 'aria-live': 'polite' }, `${list.length} / ${all.length}`),
+        anyFilter ? h('button', { type: 'button', class: 'btn btn-ghost btn-sm', onclick: () => { filters = { ...NO_FILTERS }; renderPicker(); } }, 'ფილტრის მოხსნა') : null));
 
     const same = room ? p.rooms.filter((r) => globalKey(r.purpose, surface, p.tier) === globalKey(room.purpose, surface, p.tier)).length : 0;
 
@@ -299,29 +365,37 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
         h('button', { type: 'button', class: `seg-btn${pickerState.scope === 'room' ? ' on' : ''}`, onclick: () => { pickerState.scope = 'room'; renderPicker(); } },
           `მხოლოდ: ${where}`)) : null,
       cats.length > 1 ? h('div', { class: 'tabs' }, cats.map((c) => h('button', {
-        type: 'button', class: `tab${pickerState.cat === c ? ' on' : ''}`, onclick: () => { pickerState.cat = c; renderPicker(); },
+        type: 'button', class: `tab${pickerState.cat === c ? ' on' : ''}`, onclick: () => { pickerState.cat = c; filters = { ...filters, color: 'all' }; renderPicker(); },
       }, CATEGORIES[c]))) : null,
-      h('div', { class: 'pick-grid' }, list.map((m) => {
-        const sw = swatch(m, 132);
-        sw.className = 'sw';
+      filterBar,
+      list.length ? h('div', { class: 'pick-grid' }, list.map((m) => {
+        const pr = product(m.id);
         const on = cur && cur.id === m.id;
-        return h('button', {
-          type: 'button',
-          class: `pick-card${on ? ' on' : ''}`,
-          onclick: () => {
-            let next = setFinish(current(), room, surface, m.id, room ? pickerState.scope : 'all');
-            commit(next);
-            closePicker();
-            toast(`${surfLabel}: ${m.name}`, 'ok');
+        return h('div', { class: `pick-card${on ? ' on' : ''}` },
+          h('button', {
+            type: 'button',
+            class: 'pick-main',
+            'aria-pressed': on ? 'true' : 'false',
+            onclick: () => {
+              const next = setFinish(current(), room, surface, m.id, room ? pickerState.scope : 'all');
+              commit(next);
+              closePicker();
+              toast(`${surfLabel}: ${m.name}`, 'ok');
+            },
           },
-        },
-        sw,
-        on ? h('span', { class: 'pick-on' }, icon('check', 16)) : null,
-        h('span', { class: 'pick-name' }, m.name),
-        h('span', { class: 'pick-spec' }, m.spec),
-        h('span', { class: 'pick-shop' }, shopLabel(m), m.source?.note ? h('span', { class: 'pick-note' }, ` · ${m.source.note}`) : null),
-        h('span', { class: 'pick-foot' }, h('span', { class: `tier tier-${m.tier}` }, TIERS[m.tier].label), h('b', { class: 'num' }, priceLabel(m))));
-      })),
+          sampleTile(m, 132),
+          on ? h('span', { class: 'pick-on' }, icon('check', 16)) : null,
+          h('span', { class: 'pick-name' }, m.name),
+          h('span', { class: 'pick-spec' }, m.spec),
+          pr.manufacturer ? h('span', { class: 'pick-spec' }, pr.manufacturer) : null,
+          m.source ? h('span', { class: 'pick-shop' }, shopLabel(m), m.source.note ? h('span', { class: 'pick-note' }, ` · ${m.source.note}`) : null) : null,
+          h('span', { class: 'pick-foot' }, h('span', { class: `tier tier-${m.tier}` }, TIERS[m.tier].label), h('b', { class: 'num' }, priceLabel(m)))),
+          h('div', { class: 'pick-meta' },
+            provenanceBadges(pr, { compact: true }),
+            pr.sourceUrl ? h('a', { class: 'pick-link', href: pr.sourceUrl, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `${m.name}: მაღაზიის გვერდი` }, 'გვერდი ↗') : null));
+      })) : h('div', { class: 'pick-empty' },
+        h('p', null, 'ამ ფილტრით პროდუქტი არ მოიძებნა.'),
+        h('button', { type: 'button', class: 'btn btn-sm', onclick: () => { filters = { ...NO_FILTERS }; renderPicker(); } }, 'ფილტრის მოხსნა')),
       room && source === 'room' ? h('footer', { class: 'picker-foot' },
         h('button', { type: 'button', class: 'btn btn-ghost btn-sm', onclick: () => { commit(clearRoomFinish(current(), room.id, surface)); closePicker(); } }, 'ამ ოთახის არჩევანის გაუქმება')) : null,
     );
@@ -330,6 +404,7 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
   subscribe((kind) => {
     if (state.step !== 'materials') return;
     if (kind === 'project' || kind === 'theme') {
+      board.refresh();
       render();
       renderCaption();
       if (view) view.update(current(), { refit: needsRefit });

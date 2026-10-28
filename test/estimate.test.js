@@ -28,6 +28,14 @@ test('every catalog entry is complete and has a source', () => {
     assert.ok(!ids.has(m.id), `duplicate ${m.id}`);
     ids.add(m.id);
     assert.ok(m.name && m.cat && m.measure && m.look, m.id);
+    // A design preference (e.g. a cabinet front colour) is not a shop product: it must not
+    // pretend to have a price or a shop.
+    if (m.preference) {
+      assert.equal(m.price, null, m.id);
+      assert.equal(m.source, undefined, m.id);
+      assert.equal(m.measure, 'none', m.id);
+      continue;
+    }
     assert.ok(m.price > 0, m.id);
     if (m.measure === 'paint' || m.measure === 'pack') assert.ok(m.pack && m.pack.size > 0, m.id);
     if (m.measure === 'paint') assert.ok(m.coverage > 0 && m.coats > 0, m.id);

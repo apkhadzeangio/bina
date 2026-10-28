@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "ბინის დიზაინერი",
   "scripts": {
-    "test": "node --test test/core.test.js test/estimate.test.js test/robustness.test.js test/store.test.js test/furniture.test.js test/migration.test.js test/interaction.test.js",
+    "test": "node --test test/core.test.js test/estimate.test.js test/robustness.test.js test/store.test.js test/furniture.test.js test/migration.test.js test/interaction.test.js test/materials.test.js",
     "build": "node build.mjs",
     "test:e2e": "node test/e2e/acceptance.mjs"
   },
