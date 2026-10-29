@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 const { chromium } = createRequire(import.meta.url)('playwright');
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const OUT = resolve(process.argv[2] || join(ROOT, 'e2e-shots'));
-const LIBS = process.env.BINA_LIBS;
+const LIBS = process.env.BINA_LIBS || join(ROOT, 'node_modules');
 mkdirSync(OUT, { recursive: true });
 const PAGE = readFileSync(join(ROOT, 'dist/site/index.html'), 'utf8');
 const URL0 = 'http://bina.test/';
@@ -65,7 +65,7 @@ async function screen(pg, x, y) {
 }
 
 const errors = [];
-const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: process.env.BINA_CHROMIUM || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'] });
 
 // seed: a project to find in the browser's storage on the first visit of this context.
 async function newPage(opts, seed = null) {
@@ -94,10 +94,11 @@ const report = {};
   await pg.goto(`${URL0}#plan`);
   await pg.waitForSelector('dialog.modal-welcome[open]');
   await pg.getByRole('button', { name: 'დახაზე ბადეზე' }).click();
+  await pg.waitForSelector('button[data-tool="rect"][aria-pressed="true"]');
 
   // a 4 × 5 m room with typed sizes, then its purpose
   const c = await pg.locator('canvas.plan').boundingBox();
-  await pg.mouse.click(c.x + c.width * 0.3, c.y + c.height * 0.25);
+  await pg.locator('canvas.plan').click({ position: { x: c.width * 0.3, y: c.height * 0.25 } });
   await pg.fill('#rect-w', '4');
   await pg.fill('#rect-h', '5');
   await pg.press('#rect-h', 'Enter');

@@ -14,7 +14,7 @@ import { loadThree } from './libs.js';
 import { createView3D } from './view3d.js';
 import { purposeColorVar } from './plan-editor.js';
 
-export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
+export function createMaterialsStep({ el, onGoEstimate, onGoPlan, onRender }) {
   const viewBox = h('div', { class: 'view-box', id: 'view3d' });
   const viewMsg = h('div', { class: 'view-msg' }, '3D ხედი იტვირთება…');
   const cutBtn = h('button', { type: 'button', class: 'btn btn-sm btn-float', 'aria-pressed': 'false' }, icon('layers', 16), 'კედლების ჭრილი');
@@ -29,20 +29,27 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
   const panel = h('div', { class: 'mat-panel' });
   const totalBar = h('div', { class: 'total-bar' });
   const dialog = h('dialog', { class: 'picker', id: 'picker' });
-  const board = createBoard({ onChange: (room, surface) => openPicker(room, surface) });
+  const board = createBoard({ onChange: (room, surface) => openPicker(room, surface), onRender: (roomId) => onRender?.(roomId) });
+  const aiBtn = h('button', { type: 'button', class: 'btn btn-accent ai-btn', id: 'ai-render-btn-materials', onclick: () => onRender?.(focusRoom) }, icon('sparkle', 18), 'AI დიზაინის გენერაცია');
+  const aiCta = h('div', { class: 'ai-cta' }, aiBtn, h('span', { class: 'muted small' }, 'ფოტორეალისტური კონცეფცია: AI სცენის ეტაპზე აირჩევ ოთახსა და ხედს'));
   add(el, 
     h('div', { class: 'mat-layout' },
       h('div', { class: 'view-col' },
         h('div', { class: 'view-wrap' }, viewBox, viewMsg, h('div', { class: 'view-tools' }, viewSeg, cutBtn, cornerBtn)),
+        aiCta,
         viewCaption),
       h('div', { class: 'mat-col' }, panel, totalBar)),
     dialog,
   );
+  // Shared by Materials and Scene; a hidden step must not hide its modal.
+  document.body.append(dialog);
 
   let view = null;
   let viewFailed = false;
   let focusRoom = null;
   let needsRefit = true;
+  const viewHome = viewBox.parentElement;
+  let pendingView = null;
 
   function showViewError(msg, retry) {
     viewMsg.hidden = false;
@@ -51,7 +58,12 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
       retry ? h('button', { type: 'button', class: 'btn btn-sm', onclick: () => { viewFailed = false; viewMsg.textContent = '3D ხედი იტვირთება…'; ensureView(); } }, 'თავიდან ცდა') : null);
   }
 
-  async function ensureView() {
+  function ensureView() {
+    if (pendingView) return pendingView;
+    pendingView = initView().finally(() => { pendingView = null; });
+    return pendingView;
+  }
+  async function initView() {
     if (view || viewFailed) return;
     let THREE;
     try {
@@ -402,6 +414,7 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
   }
 
   subscribe((kind) => {
+    if (state.step === 'scene' && kind === 'project') board.refresh();
     if (state.step !== 'materials') return;
     if (kind === 'project' || kind === 'theme') {
       board.refresh();
@@ -413,7 +426,23 @@ export function createMaterialsStep({ el, onGoEstimate, onGoPlan }) {
   });
 
   return {
+    openBoard(id) { board.open(id); },
+    openPicker,
+    async sceneView(container, { retry = false } = {}) {
+      if (retry) viewFailed = false;
+      await ensureView();
+      if (!view || state.step !== 'scene') return null;
+      container.append(viewBox);
+      view.update(current());
+      view.resize();
+      return view;
+    },
     show() {
+      if (viewBox.parentElement !== viewHome) {
+        viewHome.prepend(viewBox);
+        view?.leavePreparation();
+        needsRefit = true;
+      }
       render();
       renderCaption();
       ensureView().then(() => {

@@ -7,6 +7,7 @@ import { emptyProject, sampleProject, migrateProject } from '../core/model.js';
 import { createPlanEditor } from './plan-editor.js';
 import { createInspector, purposeGrid, setRoomPurpose } from './inspector.js';
 import { createMaterialsStep } from './materials.js';
+import { createSceneComposer } from './scene-composer.js';
 import { createEstimateStep } from './estimate.js';
 import { h, add, clear, icon, toast, copyText } from './dom.js';
 import { loadPdf } from './libs.js';
@@ -20,6 +21,7 @@ import { corners, furnitureLabel, roomAt } from '../core/furniture.js';
 const STEPS = [
   ['plan', 'გეგმა'],
   ['materials', 'მასალები'],
+  ['scene', 'AI სცენა'],
   ['estimate', 'ხარჯთაღრიცხვა'],
 ];
 const MAX_IMAGE = 2400;
@@ -145,8 +147,9 @@ export async function main(root) {
       sheet));
   const matSection = h('section', { class: 'step step-materials', id: 'step-materials', hidden: true });
   const estSection = h('section', { class: 'step step-estimate', id: 'step-estimate', hidden: true });
+  const sceneSection = h('section', { class: 'step step-scene', id: 'step-scene', hidden: true });
 
-  add(root, header, h('main', { class: 'main' }, planSection, matSection, estSection), planInput, jsonInput);
+  add(root, header, h('main', { class: 'main' }, planSection, matSection, sceneSection, estSection), planInput, jsonInput);
 
   const go = (step) => {
     location.hash = step;
@@ -194,7 +197,18 @@ export async function main(root) {
     if (state.step !== 'plan') go('plan');
     library.show(libraryRoom(roomId));
   }
-  const materials = createMaterialsStep({ el: matSection, onGoEstimate: () => go('estimate'), onGoPlan: () => go('plan') });
+  // "AI დიზაინის გენერაცია" from Materials or a material board: prepare that room's scene
+  // and open the generation dialog in the scene step (Stage 06).
+  const openAiFor = (roomId) => {
+    const p = current();
+    if (roomId && p.rooms.some((r) => r.id === roomId) && p.scenePreparation?.roomId !== roomId) {
+      commit({ ...p, scenePreparation: { rooms: p.scenePreparation?.rooms || {}, roomId } }, { history: false });
+    }
+    composer.openRender();
+    go('scene');
+  };
+  const materials = createMaterialsStep({ el: matSection, onGoEstimate: () => go('estimate'), onGoPlan: () => go('plan'), onRender: openAiFor });
+  const composer = createSceneComposer({ el: sceneSection, materials, onGoPlan: () => go('plan'), onGoMaterials: () => go('materials') });
   const estimate = createEstimateStep({ el: estSection, onGoPlan: () => go('plan') });
 
   // ---------------------------------------------------------------- purpose popover
@@ -415,6 +429,7 @@ export async function main(root) {
     planSection.hidden = step !== 'plan';
     matSection.hidden = step !== 'materials';
     estSection.hidden = step !== 'estimate';
+    sceneSection.hidden = step !== 'scene';
     for (const a of nav.querySelectorAll('.step-link')) {
       if (a.dataset.step === step) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');
@@ -428,6 +443,7 @@ export async function main(root) {
     renderEmpty();
     if (step === 'materials') materials.show();
     if (step === 'estimate') estimate.show();
+    if (step === 'scene') composer.show();
     window.scrollTo(0, 0);
   }
   window.addEventListener('hashchange', showStep);

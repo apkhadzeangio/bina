@@ -9,6 +9,7 @@ import { corners as furnitureCorners } from '../core/furniture.js';
 import { texturePatch, isTextured } from './textures.js';
 import { cssVar } from './dom.js';
 import { buildFurniture, FURNITURE_PALETTE } from './furniture3d.js';
+import { toThree, fromThree, validCamera } from '../core/scene-camera.js';
 
 const DEG = Math.PI / 180;
 const EYE_HEIGHT = 1.6;
@@ -50,6 +51,11 @@ export function createView3D({ THREE, container, onPickRoom }) {
   let viewKind = 'overview';
   let eye = null; // { roomId, corner }
   let cutBeforeRoom = false;
+  let preparedCamera = null;
+  let onCameraChange = null;
+  let contextLost = false;
+  renderer.domElement.addEventListener('webglcontextlost', (e) => { e.preventDefault(); contextLost = true; });
+  renderer.domElement.addEventListener('webglcontextrestored', () => { contextLost = false; render(); });
 
   const texCache = new Map();
   const matCache = new Map();
@@ -318,7 +324,7 @@ export function createView3D({ THREE, container, onPickRoom }) {
       // A bathroom without a vanity unit drawn on the plan still shows the standard one
       // the estimate counts, on the longest wall without openings.
       const hasVanity = (p.furniture || []).some((f) => f.type === 'vanity' && f.roomId === room.id);
-      if (purpose.surfaces.vanity && !hasVanity) {
+      if (purpose.surfaces.vanity && !hasVanity && !preparedCamera) {
         const es = G.edges(room.points);
         const free = es.filter((e) => !(hosts.get(`${room.id}:${e.i}`) || []).length && e.len >= 1);
         const e = (free.length ? free : es).reduce((m, x) => (x.len > m.len ? x : m));
@@ -364,7 +370,9 @@ export function createView3D({ THREE, container, onPickRoom }) {
       if (room) {
         const shape = new THREE.Shape(room.points.map((q) => new THREE.Vector2(q.x, -q.y)));
         const cg = new THREE.ShapeGeometry(shape);
-        cg.rotateX(Math.PI / 2); // facing down
+        // The shape uses (x,-planY), just like the floor. The opposite rotation
+        // mirrored ceilings into negative world Z; DoubleSide supplies the underside.
+        cg.rotateX(-Math.PI / 2);
         const ceil = new THREE.Mesh(cg, plainMat('#f3f2ee', { side: THREE.DoubleSide }));
         ceil.position.y = roomHeight(room, p);
         group.add(ceil);
@@ -414,6 +422,12 @@ export function createView3D({ THREE, container, onPickRoom }) {
 
   // ------------------------------------------------------------------ camera
   function applyCamera() {
+    if (preparedCamera) {
+      const p = toThree(preparedCamera.position);
+      camera.position.set(p.x, p.y, p.z);
+      camera.lookAt(ctl.target);
+      return;
+    }
     const { target, theta, phi, dist } = ctl;
     camera.position.set(
       target.x + dist * Math.sin(phi) * Math.cos(theta),
@@ -469,7 +483,7 @@ export function createView3D({ THREE, container, onPickRoom }) {
     renderer.setSize(w, h, false);
     renderer.domElement.style.width = `${w}px`;
     renderer.domElement.style.height = `${h}px`;
-    camera.aspect = w / h;
+    camera.aspect = preparedCamera?.aspect || w / h;
     camera.updateProjectionMatrix();
     render();
   }
@@ -495,6 +509,17 @@ export function createView3D({ THREE, container, onPickRoom }) {
     const dx = e.clientX - prev.x;
     const dy = e.clientY - prev.y;
     if (dragInfo && Math.hypot(e.clientX - dragInfo.x, e.clientY - dragInfo.y) > 4) dragInfo.moved = true;
+    if (preparedCamera) {
+      // Scene preparation looks around a fixed safe eye. Normal orbit/pan is unchanged.
+      const d = ctl.target.clone().sub(camera.position);
+      const yaw = Math.atan2(d.z, d.x) - dx * 0.006;
+      const pitch = Math.max(-1.1, Math.min(1.1, Math.asin(d.y / d.length()) + dy * 0.006));
+      const len = d.length();
+      ctl.target.set(camera.position.x + len * Math.cos(pitch) * Math.cos(yaw), camera.position.y + len * Math.sin(pitch), camera.position.z + len * Math.cos(pitch) * Math.sin(yaw));
+      preparedCamera = { ...preparedCamera, preset: 'custom', fallback: null, target: fromThree(ctl.target) };
+      render();
+      return;
+    }
     if (ptrs.size === 2) {
       const [a, b] = [...ptrs.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
@@ -514,7 +539,8 @@ export function createView3D({ THREE, container, onPickRoom }) {
   const end = (e) => {
     ptrs.delete(e.pointerId);
     if (ptrs.size < 2) pinchD = null;
-    if (dragInfo && !dragInfo.moved && e.type === 'pointerup') pick(e);
+    if (preparedCamera && dragInfo?.moved) onCameraChange?.(api.cameraState());
+    if (!preparedCamera && dragInfo && !dragInfo.moved && e.type === 'pointerup') pick(e);
     if (!ptrs.size) dragInfo = null;
   };
   el.addEventListener('pointerup', end);
@@ -522,6 +548,7 @@ export function createView3D({ THREE, container, onPickRoom }) {
   el.addEventListener('contextmenu', (e) => e.preventDefault());
   el.addEventListener('wheel', (e) => {
     e.preventDefault();
+    if (preparedCamera) return; // FOV is changed explicitly by the scene controls.
     ctl.dist = Math.max(viewKind === 'room' ? 0.6 : 2, Math.min(80, ctl.dist * Math.exp(e.deltaY * 0.0012)));
     render();
   }, { passive: false });
@@ -618,7 +645,33 @@ export function createView3D({ THREE, container, onPickRoom }) {
       .reduce((m, r) => (!m || G.area(r.points) > G.area(m.points) ? r : m), null);
   }
 
-  return {
+  const api = {
+    prepareCamera(spec, onChange) {
+      if (contextLost || renderer.getContext().isContextLost()) throw new Error('WebGL context unavailable');
+      const room = lastProject?.rooms.find((r) => r.id === spec.roomId);
+      if (!room || !validCamera(lastProject, room, spec)) throw new Error('Unsafe scene camera');
+      cancelAnimationFrame(anim);
+      preparedCamera = JSON.parse(JSON.stringify(spec));
+      onCameraChange = onChange;
+      viewKind = 'room';
+      eye = { roomId: spec.roomId, corner: 0 };
+      cut = false;
+      const target = toThree(spec.target);
+      ctl.target.set(target.x, target.y, target.z);
+      camera.fov = spec.fov;
+      camera.aspect = spec.aspect;
+      camera.updateProjectionMatrix();
+      build(lastProject);
+      resize();
+    },
+    leavePreparation() {
+      preparedCamera = null;
+      onCameraChange = null;
+      viewKind = 'overview';
+      eye = null;
+      if (lastProject) { build(lastProject); applyView(lastProject); }
+      resize();
+    },
     update(project, { refit = false } = {}) {
       const bg = cssVar('--view-bg') || '#e9ebe8';
       scene.background = new THREE.Color(bg); // clear colour is not encoded, so pass sRGB as is
@@ -654,6 +707,8 @@ export function createView3D({ THREE, container, onPickRoom }) {
     // Choose a viewpoint. 'room' needs a room; the corner number picks one of its corners.
     setView(kind, { roomId, corner = 0 } = {}) {
       if (!lastProject) return;
+      preparedCamera = null;
+      onCameraChange = null;
       const wasRoom = viewKind === 'room';
       if (kind === 'room') {
         const id = roomId || focused || largestRoom(lastProject)?.id;
@@ -679,14 +734,46 @@ export function createView3D({ THREE, container, onPickRoom }) {
     get view() {
       return { kind: viewKind, roomId: eye?.roomId || null, corner: eye?.corner || 0 };
     },
+    // A picture of the current view at an exact size (the layout sketch for an AI render).
+    // Renders off-screen-size, reads the pixels in the same task, then restores the view.
+    // Without a size it captures the view as shown (the Stage 03 behaviour).
+    snapshot({ width, height, type = 'image/jpeg', quality = 0.85 } = {}) {
+      if (!width || !height) {
+        render();
+        return renderer.domElement.toDataURL(type, quality);
+      }
+      const size = new THREE.Vector2();
+      renderer.getSize(size);
+      const ratio = renderer.getPixelRatio();
+      const aspect = camera.aspect;
+      const outlineVisible = outline ? outline.visible : null;
+      if (outline) outline.visible = false;
+      try {
+        renderer.setPixelRatio(1);
+        renderer.setSize(width, height, false);
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        render();
+        return renderer.domElement.toDataURL(type, quality);
+      } finally {
+        if (outline) outline.visible = outlineVisible;
+        renderer.setPixelRatio(ratio);
+        renderer.setSize(size.x, size.y, false);
+        camera.aspect = aspect;
+        camera.updateProjectionMatrix();
+        render();
+      }
+    },
     // The current camera, for saving with the project or sending with an AI request.
     cameraState() {
+      if (preparedCamera) return { ...preparedCamera, position: fromThree(camera.position), target: fromThree(ctl.target), fov: camera.fov, aspect: camera.aspect };
       return {
         kind: viewKind,
         roomId: eye?.roomId || null,
         position: { x: camera.position.x, y: camera.position.z, z: camera.position.y },
         target: { x: ctl.target.x, y: ctl.target.z, z: ctl.target.y },
         fov: camera.fov,
+        aspect: camera.aspect,
       };
     },
     fit() {
@@ -718,9 +805,32 @@ export function createView3D({ THREE, container, onPickRoom }) {
       Object.assign(ctl, c);
       render();
     },
-    snapshot() {
-      render();
-      return renderer.domElement.toDataURL('image/jpeg', 0.85);
+    async capturePNG({ width = 1280 } = {}) {
+      if (contextLost || renderer.getContext().isContextLost()) throw new Error('WebGL context unavailable');
+      const size = renderer.getSize(new THREE.Vector2());
+      const ratio = renderer.getPixelRatio();
+      const aspect = camera.aspect;
+      const fov = camera.fov;
+      // Copy synchronously immediately after rendering; toBlob encodes the 2D copy
+      // after the original renderer dimensions and camera have been restored.
+      const copy = document.createElement('canvas');
+      copy.width = width;
+      copy.height = Math.round(width / aspect);
+      try {
+        renderer.setPixelRatio(1);
+        renderer.setSize(copy.width, copy.height, false);
+        render();
+        copy.getContext('2d').drawImage(renderer.domElement, 0, 0);
+      } finally {
+        renderer.setPixelRatio(ratio);
+        renderer.setSize(size.x, size.y, false);
+        camera.aspect = aspect;
+        camera.fov = fov;
+        camera.updateProjectionMatrix();
+        render();
+      }
+      return new Promise((resolve, reject) => copy.toBlob((b) => b ? resolve(b) : reject(new Error('PNG capture failed')), 'image/png'));
     },
   };
+  return api;
 }
