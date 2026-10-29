@@ -14,12 +14,16 @@ Everything happens in the **bina** Pages project and the provider consoles. The 
 | **Cloudflare Workers Paid** plan | the Free plan allows 10 ms CPU per request; image payloads of several MB need more (Paid: 30 s default) | $5 / month |
 | Cloudflare **D1** database | quotas and spending records | within the Workers plan allowance for this volume |
 
-Rough cost per image, from the official prices, 1536×1024, with the sketch plus 4 material samples (estimates; the real cost is recorded per image):
+Upper estimate per image, from the official prices (29.10.2026), with the blockout, the plan and 4 material samples. The frame follows the scene camera. These are the server's estimates before sending; the real cost is recorded per image from the provider's usage report.
 
-| Model | low | medium | high |
+| Model · frame | low | medium | high |
 |---|---|---|---|
-| gpt-image-2.5-sunburst / flare | ≈ $0.10 | ≈ $0.14 | ≈ $0.31 |
-| gemini-3-pro-image (fallback, 1K/2K) | ≈ $0.17 | ≈ $0.17 | ≈ $0.17 |
+| gpt-image-2.5-sunburst / flare · 16:9 (1536×864) | ≈ $0.12 | ≈ $0.15 | ≈ $0.30 |
+| gpt-image-2.5-sunburst / flare · 4:3 (1536×1152) | ≈ $0.12 | ≈ $0.17 | ≈ $0.37 |
+| gpt-image-2.5-sunburst / flare · 1:1 (1024×1024) | ≈ $0.11 | ≈ $0.14 | ≈ $0.26 |
+| gemini-3-pro-image (fallback), any frame | ≈ $0.17 | ≈ $0.17 | ≈ $0.17 |
+
+After the first live renders, the estimate is raised automatically when real costs turn out higher (highest real cost per image in the last 30 days + 10 %).
 
 Set provider-side limits too: a monthly budget in the OpenAI billing settings, and a budget alert in Google Cloud.
 
@@ -70,7 +74,7 @@ Optional:
 
 1. Redeploy (merge to `main`, or **Deployments → Retry deployment**). Secrets apply to new deployments only.
 2. Open `https://bina.lithos.ge/api/render/config`. Expect `"available": true`. If it says `"reason": "not_configured"`, one of the following is missing: key, budget, salt, `BINA_DB` or codes.
-3. In the app: **Materials** → **AI დიზაინის გენერაცია** → confirm → enter an access code → **Generate**.
+3. In the app, open the **AI სცენა** step (or use **AI დიზაინის გენერაცია** in Materials, which opens it), choose the room and viewpoint, press **AI დიზაინის გენერაცია**, check the materials, pick a style, accept the cost, enter an access code → **Generate**.
 4. Check spending in D1 → Console:
    `SELECT month, ROUND(SUM(COALESCE(actual_usd, est_usd)),4) usd, COUNT(*) n FROM render_jobs WHERE charged=1 GROUP BY month;`
 
@@ -81,7 +85,7 @@ Every request is checked in this order:
 2. Allowed origin.
 3. Valid access code.
 4. Size limits.
-5. Valid scene and images.
+5. Valid Stage 05 scene: the JSON schema, a revision the server recomputes itself, geometry (walls, openings, furniture footprints), a camera inside the room, catalog products on allowed surfaces, and no unresolved mandatory material. Valid JPEG/PNG images within their size limits.
 6. The user's explicit consent (data transfer and age 18+).
 7. The user accepted a cost **at least as high as the server's estimate**.
 8. The estimate is under `RENDER_MAX_COST_USD`.
@@ -92,6 +96,6 @@ Afterwards the row gets the real cost from the provider's usage report. Attempts
 
 ## Data and privacy
 
-- **Sent to the provider:** the sketch image, drawn material samples, and text built from room dimensions, openings, furniture types and sizes, and product names and colours. No user names, codes or addresses are sent. OpenAI gets a hashed `safety_identifier`.
+- **Sent to the provider:** the 3D blockout, the plan drawing of that one room, drawn material samples, and text the server builds from the checked scene: room type and dimensions, openings, furniture types and sizes, camera height and field of view, product names, colours and sizes from BINA's catalog, style and light. The user's optional free-text suggestion is sent quoted, ranked below every constraint. Not sent: room names, project titles, prices, uploaded plan files, user names, codes or addresses. OpenAI gets a hashed `safety_identifier`.
 - **Stored in D1:** hashed user and address keys, model, size, status, cost and scene revision. No images, prompts or plain addresses.
-- **Images:** returned to the browser and saved there (IndexedDB) when the user presses "save". The project file keeps only the record (id, scene revision, model, cost, camera, style).
+- **Images:** returned to the browser and saved there (IndexedDB) when the user presses "save". The project file keeps only the record (id, room, Stage 05 scene revision, model, quality, frame, cost, camera and scene settings). When the plan, finishes, camera, style or light of that room change, the record shows as "plan changed"; the plan itself is never changed to match an image.

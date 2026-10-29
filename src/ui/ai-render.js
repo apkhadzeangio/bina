@@ -298,7 +298,7 @@ export function createRenderDialog({ getContext }) {
           h('label', { class: 'check' }, h('input', { type: 'checkbox', id: 'ai-consent-adult', checked: form.consentAdult, onchange: (e) => { form.consentAdult = e.target.checked; render(); } }), ' ვარ 18 წლის ან უფროსი.'),
           available && cfg.accessCodeRequired ? h('label', { class: 'field' }, h('span', null, 'წვდომის კოდი'),
             h('input', { class: 'text-in', id: 'ai-code', type: 'password', autocomplete: 'off', value: form.code, oninput: (e) => { form.code = e.target.value; syncSubmit(); } })) : null,
-          h('p', { class: 'ai-note' }, icon('image', 16), ' შედეგი იქნება ', h('b', null, 'კონცეპტუალური AI ვიზუალიზაცია'), ', არა ზუსტი არქიტექტურული ნახაზი. ზომები და მასალების რაოდენობა — გეგმასა და ხარჯთაღრიცხვაში.')),
+          h('p', { class: 'ai-note' }, icon('image', 16), h('span', null, 'შედეგი იქნება ', h('b', null, 'კონცეპტუალური AI ვიზუალიზაცია'), ', არა ზუსტი არქიტექტურული ნახაზი. ზომები და მასალების რაოდენობა — გეგმასა და ხარჯთაღრიცხვაში.'))),
 
         saved.length ? h('section', { class: 'ai-sec' }, h('h3', null, 'შენახული ვიზუალიზაციები'),
           h('div', { class: 'ai-gallery' }, saved.map((meta) => galleryItem(meta, p)))) : null,

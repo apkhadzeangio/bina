@@ -1,11 +1,17 @@
 # Stage 06 — image provider evaluation
 
-Read from the providers' official documentation on **28 October 2026**. Prices and models change; re-check before raising the budget.
+Read from the providers' official documentation on **28 October 2026** and re-checked on **29 October 2026** (models, prices and reference limits unchanged). Prices and models change; re-check before raising the budget.
 
 ## What BINA needs from a model
 
-BINA sends one **layout sketch** (its own 3D view of the room from the chosen camera) and up to 7 **drawn material samples**. It asks for a photorealistic interior that keeps:
-- the walls, openings, furniture positions and camera from the sketch
+BINA renders from the Stage 05 scene (`bina.ai-scene` v1). For each request it sends:
+- the **3D blockout** — the Stage 05 viewer's image of the room from the scene camera, in the camera's frame (16:9, 4:3 or 1:1)
+- a **top-down plan drawing** of the same room (layout reference)
+- up to 12 **drawn material samples** (one per finish that has a sample)
+- a text prompt built on the server from the checked scene and the server's catalog
+
+It asks for a photorealistic interior that keeps:
+- the walls, openings, furniture positions, camera and field of view of the blockout
 - the chosen finishes
 
 That is an image **edit with several reference images**, not plain text-to-image.
@@ -29,9 +35,9 @@ API access is separate from consumer plans. ChatGPT Plus/Pro and Google AI subsc
 ## Decision
 
 **Primary: OpenAI `gpt-image-2.5-sunburst`** through the Images edits endpoint.
-- It takes the most reference images (16): the sketch plus every finish sample fits.
+- It takes the most reference images (16): the blockout, the plan and every finish sample fit.
 - It is positioned explicitly for precise editing, which is what "keep this layout, change the surfaces" needs.
-- Arbitrary output sizes give the exact 3:2 frame the sketch was drawn in (1536×1024).
+- Arbitrary output sizes give exactly the scene camera's frame: 16:9 → 1536×864, 4:3 → 1536×1152, 1:1 → 1024×1024.
 - The response's `usage` gives the real cost of each image, which BINA records.
 - Clear output ownership; no training on API data.
 - Administrators can switch to `gpt-image-2.5-flare` (same token prices, faster) with one variable.
@@ -39,7 +45,7 @@ API access is separate from consumer plans. ChatGPT Plus/Pro and Google AI subsc
 **Fallback: Google `gemini-3-pro-image`** (Nano Banana Pro), optional.
 - A different company and infrastructure, so an OpenAI outage or overload does not stop the feature.
 - A fixed, published per-image price.
-- It takes fewer object references (6), so BINA sends the sketch and the 5 most important samples.
+- It takes fewer object references (6), so BINA sends the blockout, the plan and the 4 most important samples (mandatory finishes first). It is asked for the same aspect ratio as the camera.
 - Images carry SynthID, and Google's 18+ requirement is covered by the age confirmation in the dialog.
 - BINA uses the fallback only after a retryable provider failure (server error, overload, network), never after a refusal or timeout. It does so only when the fallback's estimate is not higher than the cost the user accepted.
 
@@ -47,7 +53,7 @@ API access is separate from consumer plans. ChatGPT Plus/Pro and Google AI subsc
 
 ## Risks that remain
 
-- **No per-image price for GPT Image 2.5.** BINA estimates with the per-image token counts OpenAI published for gpt-image-1 plus a 25 % margin, and records the real cost from `usage`. The first live renders will show how close the estimate is (see VERIFICATION.md).
+- **No per-image price for GPT Image 2.5.** BINA estimates with the per-image token counts OpenAI published for gpt-image-1 (scaled by the frame's pixel area) plus a 25 % margin, and records the real cost from `usage`. After live renders, the estimate is never below the highest real cost per image of the last 30 days for the same model, quality and frame, plus 10 %. If that raises the estimate above what the user accepted, the request stops with "estimate changed" and the user must accept the new amount. Until the first live renders, how close the formula is remains unknown (see VERIFICATION.md).
 - **Layout fidelity is not guaranteed by any provider.** The images are labelled as concepts, and the plan stays the source of truth.
 - Gemini's `generateContent` is marked legacy. If Google retires it, the adapter must move to the Interactions API.
 

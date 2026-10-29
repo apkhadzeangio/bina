@@ -284,6 +284,8 @@ const report = {};
   await openAi(pg);
   await pg.waitForSelector('dialog.ai-dialog .ai-thumb');
   assert.match(await pg.textContent('dialog.ai-dialog .ai-thumb'), /გეგმა შეიცვალა/);
+  await pg.locator('dialog.ai-dialog .ai-gallery').scrollIntoViewIfNeeded();
+  await settle(pg, 300);
   await pg.screenshot({ path: join(OUT, 'r3-gallery-outdated.png') });
   await pg.keyboard.press('Escape');
   await pg.context().close();
