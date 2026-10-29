@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "description": "ბინის დიზაინერი",
   "scripts": {
-    "test": "node --test test/core.test.js test/estimate.test.js test/robustness.test.js test/store.test.js test/furniture.test.js test/migration.test.js test/interaction.test.js test/materials.test.js test/scene.test.js test/render-server.test.js test/render-bundle.test.js",
+    "test": "node --test test/core.test.js test/estimate.test.js test/robustness.test.js test/store.test.js test/furniture.test.js test/migration.test.js test/interaction.test.js test/materials.test.js test/scene.test.js test/render-scene.test.js test/render-server.test.js test/render-bundle.test.js",
     "build": "node build.mjs",
-    "test:e2e": "node test/e2e/acceptance.mjs"
+    "test:e2e": "node test/e2e/acceptance.mjs && node test/e2e/materials.mjs && node test/e2e/scene.mjs && node test/e2e/ai-render.mjs",
+    "test:e2e:scene": "node test/e2e/scene.mjs"
   },
   "keywords": [],
   "author": "",
@@ -13,9 +14,18 @@
   "type": "module",
   "private": true,
   "devDependencies": {
-    "esbuild": "^0.21.5"
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/noto-sans-georgian": "^5.3.0",
+    "@fontsource/noto-serif-georgian": "^5.3.0",
+    "ajv": "^8.20.0",
+    "esbuild": "^0.21.5",
+    "playwright": "1.51.1",
+    "three": "^0.128.0"
   },
   "engines": {
     "node": ">=22.5"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3"
   }
 }

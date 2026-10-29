@@ -53,10 +53,14 @@ export function checkImage(dataUrl, maxBytes) {
   return { mime: m[1], data: m[2], bytes, url: dataUrl };
 }
 
-export const LIMITS = { sketchBytes: 1.5 * 1024 * 1024, sampleBytes: 300 * 1024, maxSamples: 8 };
+export const LIMITS = { blockoutBytes: 1.5 * 1024 * 1024, planBytes: 600 * 1024, sampleBytes: 300 * 1024, maxSamples: 12 };
 
-// The request: { scene, sceneRevision, sketch, samples: [{ surface, image }], style is in
-// the scene, options: { quality, aspect, count }, consent: { dataTransfer, adult, maxUsd } }
+// The request:
+// { scene: <bina.ai-scene v1>, sceneRevision, blockout: <data URL>, plan?: <data URL>,
+//   samples: [{ key: '<roomId|*>|<surface>', image: <data URL> }],
+//   options: { quality, count }, consent: { dataTransfer, adult, maxUsd } }
+// The frame (aspect) is the scene camera's; style, lighting and the user's suggestion are in
+// the scene's preferences.
 export function checkRequest(body, cfg) {
   const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
   if (!isObj(body)) throw new RenderError('bad_request', 400);
@@ -66,18 +70,18 @@ export function checkRequest(body, cfg) {
   if (!Number.isFinite(maxUsd) || maxUsd <= 0) throw new RenderError('consent_required', 403, { detail: 'no accepted cost' });
   const o = isObj(body.options) ? body.options : {};
   const quality = cfg.qualities.includes(o.quality) ? o.quality : null;
-  const aspect = ASPECTS.includes(o.aspect) ? o.aspect : null;
   const count = Number.isInteger(o.count) && o.count >= 1 && o.count <= cfg.maxImages ? o.count : null;
-  if (!quality || !aspect || !count) throw new RenderError('bad_request', 400, { detail: `options: quality one of ${cfg.qualities.join('/')}, aspect one of ${ASPECTS.join('/')}, count 1..${cfg.maxImages}` });
-  if (typeof body.sceneRevision !== 'string' || !/^s1-[0-9a-f]{14}$/.test(body.sceneRevision)) throw new RenderError('bad_scene', 400, { detail: 'sceneRevision' });
-  const sketch = checkImage(body.sketch, LIMITS.sketchBytes);
+  if (!quality || !count) throw new RenderError('bad_request', 400, { detail: `options: quality one of ${cfg.qualities.join('/')}, count 1..${cfg.maxImages}` });
+  if (typeof body.sceneRevision !== 'string' || !/^fnv1a64-[0-9a-f]{16}$/.test(body.sceneRevision)) throw new RenderError('bad_scene', 400, { detail: 'sceneRevision' });
+  const blockout = checkImage(body.blockout, LIMITS.blockoutBytes);
+  const plan = body.plan === undefined || body.plan === null ? null : checkImage(body.plan, LIMITS.planBytes);
   const rawSamples = Array.isArray(body.samples) ? body.samples : [];
   if (rawSamples.length > LIMITS.maxSamples) throw new RenderError('bad_request', 400, { detail: 'too many samples' });
-  const samples = rawSamples.map((s) => {
-    if (!isObj(s) || typeof s.surface !== 'string') throw new RenderError('bad_request', 400, { detail: 'sample' });
-    return { surface: s.surface, image: checkImage(s.image, LIMITS.sampleBytes) };
+  const samples = rawSamples.map((x) => {
+    if (!isObj(x) || typeof x.key !== 'string' || x.key.length > 120) throw new RenderError('bad_request', 400, { detail: 'sample' });
+    return { key: x.key, image: checkImage(x.image, LIMITS.sampleBytes) };
   });
-  return { scene: body.scene, sceneRevision: body.sceneRevision, sketch, samples, quality, aspect, count, maxUsd };
+  return { scene: body.scene, sceneRevision: body.sceneRevision, blockout, plan, samples, quality, count, maxUsd };
 }
 
 export { QUALITIES, ASPECTS };

@@ -1,6 +1,6 @@
 // Prices and cost estimates (USD). Prices are from the providers' official pages, read on
-// 2026-10-28 (see docs/stage-06/PROVIDERS.md). They change: an administrator should check
-// them before raising the budget.
+// 2026-10-28 and re-read on 2026-10-29 (see docs/stage-06/PROVIDERS.md). They change: an
+// administrator should check them before raising the budget.
 //
 // OpenAI GPT Image models are billed per token. OpenAI publishes no per-image table for the
 // 2.5 models, so the OUTPUT_TOKENS table below is an assumption, taken from the per-image
@@ -14,12 +14,11 @@ export const OPENAI_RATES = {
   'gpt-image-2.5-flare': { text: 5, imageIn: 8, imageOut: 30 },
 };
 
-// Assumed output tokens per image (gpt-image-1 published values) by quality and shape.
-export const OPENAI_OUTPUT_TOKENS = {
-  low: { square: 272, wide: 408 },
-  medium: { square: 1056, wide: 1584 },
-  high: { square: 4160, wide: 6240 },
-};
+// Assumed output tokens for a 1024×1024 image (gpt-image-1 published values) by quality;
+// other frames scale with their pixel area (gpt-image-1's 1536×1024 values were exactly
+// 1.5×). OpenAI publishes no per-image token table for GPT Image 2.5; real costs come from
+// `usage`, and the server raises its estimate from recent real costs (store.js).
+export const OPENAI_OUTPUT_TOKENS = { low: 272, medium: 1056, high: 4160 };
 export const OPENAI_INPUT_TOKENS_PER_IMAGE = 1500; // assumption; billed from `usage` afterwards
 export const OPENAI_MARGIN = 1.25;
 
@@ -36,8 +35,14 @@ export const MODELS = {
   gemini: Object.fromEntries(Object.keys(GEMINI_RATES).map((k) => [k, { maxReferences: GEMINI_MAX_REFERENCES[k] }])),
 };
 
-export const OPENAI_SIZES = { landscape: '1536x1024', portrait: '1024x1536', square: '1024x1024' };
-export const GEMINI_ASPECTS = { landscape: '3:2', portrait: '2:3', square: '1:1' };
+// The output frame follows the scene camera's aspect (Stage 05 keeps FOV and aspect fixed).
+// GPT Image 2.5 takes any W×H divisible by 16 with an aspect between 1:3 and 3:1.
+export const OPENAI_SIZES = { '16:9': '1536x864', '4:3': '1536x1152', '1:1': '1024x1024' };
+export const GEMINI_ASPECTS = { '16:9': '16:9', '4:3': '4:3', '1:1': '1:1' };
+const areaFactor = (aspect) => {
+  const [w, h] = (OPENAI_SIZES[aspect] || '').split('x').map(Number);
+  return w && h ? (w * h) / (1024 * 1024) : null;
+};
 export const geminiSize = (quality) => (quality === 'high' ? '2K' : '1K');
 
 const round = (v) => Math.round(v * 10000) / 10000;
@@ -47,15 +52,17 @@ export function estimateCost(provider, model, { quality, aspect, count = 1, refe
   if (provider === 'openai') {
     const r = OPENAI_RATES[model];
     if (!r) return null;
-    const out = OPENAI_OUTPUT_TOKENS[quality]?.[aspect === 'square' ? 'square' : 'wide'];
-    if (!out) return null;
+    const base = OPENAI_OUTPUT_TOKENS[quality];
+    const k = areaFactor(aspect);
+    if (!base || !k) return null;
+    const out = base * k;
     const input = (promptChars / 4) * r.text + references * OPENAI_INPUT_TOKENS_PER_IMAGE * r.imageIn;
     const perImage = (out * r.imageOut) / 1e6;
     return round((input / 1e6 + perImage * count) * OPENAI_MARGIN);
   }
   if (provider === 'gemini') {
     const r = GEMINI_RATES[model];
-    if (!r) return null;
+    if (!r || !GEMINI_ASPECTS[aspect]) return null;
     const perCall = r.image[geminiSize(quality)] + references * r.inImage + (promptChars / 4) * r.text / 1e6 + GEMINI_THINKING_TOKENS * r.out / 1e6;
     return round(perCall * count); // one image per call
   }
@@ -84,15 +91,18 @@ export function actualCost(provider, model, usage) {
   return null;
 }
 
-// The estimate for a request, the same in the browser and on the server: the sketch plus as
-// many material samples as the model takes, and a fixed prompt size.
-export const PROMPT_CHARS_FOR_ESTIMATE = 4000;
+// The estimate for a request: the blockout, the plan drawing (when sent) and as many material
+// samples as the model takes, with a fixed prompt size that covers the longest prompts
+// (a large room with every finish and a 1200-character suggestion).
+export const PROMPT_CHARS_FOR_ESTIMATE = 8000;
 
-export function referencesFor(provider, model, sampleCount) {
+// Reference images the provider will get: [blockout, plan?, samples...] within its limit.
+export function referencesFor(provider, model, sampleCount, withPlan = true) {
   const max = MODELS[provider]?.[model]?.maxReferences || 1;
-  return 1 + Math.min(sampleCount, max - 1);
+  const fixed = withPlan && max >= 2 ? 2 : 1;
+  return fixed + Math.max(0, Math.min(sampleCount, max - fixed));
 }
 
-export function estimateRequest(provider, model, { quality, aspect, count, samples }) {
-  return estimateCost(provider, model, { quality, aspect, count, references: referencesFor(provider, model, samples), promptChars: PROMPT_CHARS_FOR_ESTIMATE });
+export function estimateRequest(provider, model, { quality, aspect, count, samples, withPlan = true }) {
+  return estimateCost(provider, model, { quality, aspect, count, references: referencesFor(provider, model, samples, withPlan), promptChars: PROMPT_CHARS_FOR_ESTIMATE });
 }

@@ -98,3 +98,18 @@ export async function finish(db, id, { status, charged, actualUsd = null, errorC
   await db.prepare('UPDATE render_jobs SET status = ?2, charged = ?3, actual_usd = ?4, error_code = ?5, latency_ms = ?6 WHERE id = ?1')
     .bind(id, status, charged ? 1 : 0, actualUsd, errorCode, latencyMs).run();
 }
+
+// The highest real per-image cost of recent successful renders with the same model, quality
+// and frame (null when there are none). OpenAI publishes no per-image figure for GPT Image
+// 2.5, so the server never estimates below what such an image has actually cost.
+export async function recentCost(db, { provider, model, quality, aspect, now, days = 30, limit = 20 }) {
+  await ensureSchema(db);
+  const row = await db.prepare(`SELECT MAX(per_image) AS m FROM (
+      SELECT actual_usd * 1.0 / images AS per_image FROM render_jobs
+      WHERE provider = ?1 AND model = ?2 AND quality = ?3 AND aspect = ?4 AND status = 'succeeded'
+        AND actual_usd IS NOT NULL AND created_at > ?5
+      ORDER BY created_at DESC LIMIT ?6)`)
+    .bind(provider, model, quality, aspect, now - days * 86400000, limit).first();
+  const v = Number(row?.m);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}

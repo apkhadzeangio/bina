@@ -1,15 +1,17 @@
-// Browser integration test for stage 06 (AI rendering), on the built page:
+// Browser integration test for stage 06 (AI rendering) on top of the Stage 05 scene step,
+// on the built page:
 //
 //   draw a 4 × 5 m bedroom → place a bed and a wardrobe → choose the floor and the walls →
-//   open "AI დიზაინის გენერაცია" → confirm room, viewpoint, materials, style, cost →
+//   "AI დიზაინის გენერაცია" (Materials) → the scene step opens with the dialog → change the
+//   viewpoint in the scene step → pick a render style → confirm materials and cost →
 //   generate → see the labelled result → save it with its scene revision → change the plan
 //   → the saved render shows as out of date. Also: service not configured, provider errors,
 //   timeout, quota and cancellation, as the user sees them.
 //
 // The page talks to the REAL render handler (server/render/handler.js) with a test D1
-// database. Only the image provider is a MOCK: it returns the layout sketch it received
-// as its "image". This test proves the integration, not image quality; live generation
-// needs real credentials (docs/stage-06/VERIFICATION.md).
+// database. Only the image provider is a MOCK: it returns the 3D blockout it received as
+// its "image". This test proves the integration, not image quality; live generation needs
+// real credentials (docs/stage-06/VERIFICATION.md).
 //
 //   npm run build && node test/e2e/ai-render.mjs [screenshot folder]
 // Offline: BINA_LIBS=<folder with three/build/three.min.js>.
@@ -52,7 +54,7 @@ const mockFetch = async (url, init) => {
 };
 const echoSketch = (body) => new Response(JSON.stringify({
   output_format: 'jpeg',
-  data: [{ b64_json: body.images[0].image_url.split(',')[1] }], // MOCK: the sketch comes back as the "render"
+  data: [{ b64_json: body.images[0].image_url.split(',')[1] }], // MOCK: the blockout comes back as the "render"
   usage: { input_tokens: 5000, input_tokens_details: { text_tokens: 1000, image_tokens: 4000 }, output_tokens: 1584 },
 }), { status: 200 });
 
@@ -99,11 +101,16 @@ async function choose(pg, roomId, surfaceLabel, name) {
   await settle(pg);
 }
 
+// From Materials: the button prepares the scene step and opens the dialog there.
 async function openAi(pg) {
-  await pg.click('#ai-render-btn');
+  if (await pg.locator('#ai-render-btn-materials').isVisible()) await pg.click('#ai-render-btn-materials');
+  else await pg.click('#ai-render-btn');
   await pg.waitForSelector('dialog.ai-dialog[open]');
-  await settle(pg, 600);
+  await pg.waitForFunction(() => location.hash === '#scene' && !!window.__binaScene?.view, null, { timeout: 20000 });
+  await pg.waitForSelector('dialog.ai-dialog .ai-sketch img', { timeout: 20000 });
+  await settle(pg, 400);
 }
+const sceneNow = (pg) => pg.evaluate(() => JSON.parse(JSON.stringify(window.__binaScene.scene)));
 
 async function confirmAndGenerate(pg, { code = 'bina-test-code' } = {}) {
   const boxes = pg.locator('dialog.ai-dialog .ai-consent input[type=checkbox]');
@@ -121,7 +128,7 @@ const report = {};
   env = {}; // nothing set: the button exists, generation is not possible
   const pg = await newPage();
   await pg.goto(`${URL0}#materials`);
-  await pg.waitForSelector('#ai-render-btn');
+  await pg.waitForSelector('#ai-render-btn-materials');
   await pg.waitForFunction(() => !!window.__binaView, null, { timeout: 20000 });
   await openAi(pg);
   await pg.waitForSelector('dialog.ai-dialog .status.warn');
@@ -131,7 +138,7 @@ const report = {};
   await boxes.nth(0).check();
   await boxes.nth(1).check();
   assert.equal(await pg.locator('#ai-submit').isDisabled(), true, 'no generation without a configured service');
-  assert.ok(await pg.locator('dialog.ai-dialog .ai-sketch img').count(), 'the sketch is still prepared');
+  assert.ok(await pg.locator('dialog.ai-dialog .ai-sketch img').count(), 'the 3D blockout is still prepared');
   await pg.screenshot({ path: join(OUT, 'r0-not-configured.png') });
   assert.equal(providerCalls.length, 0);
   await pg.context().close();
@@ -177,21 +184,35 @@ const report = {};
   await choose(pg, roomId, 'კედლები', 'სალბისფერი');
   p = await saved(pg);
   assert.deepEqual(p.finish.rooms[roomId], { floor: 'lam_kt502', walls: 'paint_mid_sage' });
-  const before = JSON.stringify({ ...p, renders: undefined });
+  const projectStyle = p.style;
 
-  // the dialog: room, viewpoint, materials, style, cost
+  // the dialog opens in the scene step with this room, its viewpoint and materials
   await openAi(pg);
-  assert.equal(await pg.locator('dialog.ai-dialog select').inputValue(), roomId);
+  assert.match(await pg.textContent('dialog.ai-dialog .facts'), /20\.0 მ²/);
   const mats = await pg.textContent('dialog.ai-dialog .ai-mats');
   assert.match(mats, /KT502/);
   assert.match(mats, /სალბისფერი/);
-  await pg.click('dialog.ai-dialog >> text=სხვა კუთხე');
-  await settle(pg, 400);
+  // a different viewpoint is chosen in the scene step itself
+  await pg.click('dialog.ai-dialog >> text=ხედის შეცვლა სცენაში');
+  await pg.selectOption('#scene-preset', 'window');
+  await settle(pg, 600);
+  await pg.click('#ai-render-btn');
+  await pg.waitForSelector('dialog.ai-dialog[open]');
+  await settle(pg, 600);
+  assert.match(await pg.textContent('dialog.ai-dialog .facts'), /ფანჯრისკენ/);
+  // a style for this picture only
   await pg.click('dialog.ai-dialog .tab >> text=სკანდინავიური');
+  await settle(pg, 600);
   const cost = await pg.textContent('dialog.ai-dialog .ai-cost');
-  assert.match(cost, /≈ \$0\.\d+/);
+  assert.match(cost, /≤ \$0\.\d+/);
   assert.match(cost, /gpt-image-2\.5-sunburst/);
   await pg.screenshot({ path: join(OUT, 'r1-dialog.png') });
+  const sceneSent = await sceneNow(pg);
+  assert.equal(sceneSent.preferences.style, 'scandi');
+  assert.equal(sceneSent.camera.preset, 'window');
+  p = await saved(pg);
+  assert.equal(p.style, projectStyle, 'the project style is unchanged');
+  const before = JSON.stringify({ ...p, renders: undefined });
   await confirmAndGenerate(pg);
   await pg.waitForSelector('dialog.ai-dialog .ai-result img', { timeout: 20000 });
   await settle(pg, 500);
@@ -201,29 +222,38 @@ const report = {};
   assert.equal(providerCalls.length, 1);
   const call = providerCalls[0].body;
   assert.equal(call.model, 'gpt-image-2.5-sunburst');
-  assert.equal(call.size, '1536x1024');
+  assert.equal(call.size, '1536x864', 'the 16:9 frame of the scene camera');
   assert.match(call.images[0].image_url, /^data:image\/jpeg;base64,/);
-  assert.ok(call.images.length >= 3, 'sketch plus material samples');
+  assert.match(call.images[1].image_url, /^data:image\/jpeg;base64,/, 'the plan drawing');
+  assert.ok(call.images.length >= 4, 'blockout, plan and material samples');
+  assert.match(call.prompt, /Image 1 is a plain 3D blockout/);
   assert.match(call.prompt, /Room: 4\.00 m × 5\.00 m/);
   assert.match(call.prompt, /double bed, 1\.60 m × 2\.00 m/);
   assert.match(call.prompt, /tall wardrobe/);
   assert.match(call.prompt, /KT502 Lussac Ash/);
   assert.match(call.prompt, /Scandinavian/);
   const sketchBytes = Buffer.from(call.images[0].image_url.split(',')[1], 'base64');
-  assert.ok(sketchBytes.length > 20000, 'a real rendered sketch, not an empty canvas');
+  assert.ok(sketchBytes.length > 20000, 'a real rendered blockout, not an empty canvas');
+  assert.equal(sketchBytes.readUInt16BE(0), 0xffd8);
 
   // the result is labelled and tied to the scene revision
   const label = await pg.textContent('dialog.ai-dialog .ai-label');
   assert.match(label, /AI კონცეფცია — არა ზუსტი ნახაზი/);
-  const rev = await pg.textContent('dialog.ai-dialog .facts code');
-  assert.match(rev, /^s1-[0-9a-f]{14}$/);
-  await pg.click('dialog.ai-dialog >> text=პროექტში შენახვა');
-  await settle(pg);
+  const rev = await pg.textContent('#ai-result-revision');
+  assert.match(rev, /^fnv1a64-[0-9a-f]{16}$/);
+  assert.equal(rev, sceneSent.revision, 'the result belongs to the scene that was sent');
+  assert.match(await pg.textContent('#ai-result-fresh'), /ემთხვევა გეგმას/);
+  await pg.click('#ai-save');
+  // the image goes to IndexedDB first, then the record is saved with the project (debounced)
+  await pg.waitForFunction(() => (JSON.parse(localStorage.getItem('bina-designer:project:v1') || '{}').renders || []).length === 1, null, { timeout: 5000 });
   p = await saved(pg);
   assert.equal(p.renders.length, 1);
   assert.equal(p.renders[0].sceneRevision, rev);
   assert.equal(p.renders[0].roomId, roomId);
   assert.equal(p.renders[0].style, 'scandi');
+  assert.equal(p.renders[0].aspect, '16:9');
+  assert.equal(p.renders[0].camera.preset, 'window');
+  assert.equal(p.renders[0].projectFingerprint, sceneSent.projectFingerprint);
   assert.equal(p.renders[0].costBasis, 'usage');
   assert.equal(JSON.stringify({ ...p, renders: undefined }), before, 'the plan and the products are unchanged by the result');
   const stored = await pg.evaluate((id) => new Promise((res) => {
@@ -238,11 +268,17 @@ const report = {};
 
   // download carries the label in the image
   const [dl] = await Promise.all([pg.waitForEvent('download'), pg.click('dialog.ai-dialog >> text=ჩამოტვირთვა')]);
-  assert.match(dl.suggestedFilename(), /^bina-ai-s1-[0-9a-f]{14}-.+\.jpg$/);
+  assert.match(dl.suggestedFilename(), /^bina-ai-fnv1a64-[0-9a-f]{16}-.+\.jpg$/);
   await pg.keyboard.press('Escape');
 
-  // reload: the render is still there; after a change of the plan it shows as out of date
+  // reload: the render is still there and current; after a change of the plan it is out of date
   await pg.reload();
+  await pg.waitForFunction(() => !!window.__binaScene?.view, null, { timeout: 20000 });
+  await pg.click('#ai-render-btn');
+  await pg.waitForSelector('dialog.ai-dialog .ai-thumb');
+  assert.match(await pg.textContent('dialog.ai-dialog .ai-thumb'), /მიმდინარე/);
+  await pg.keyboard.press('Escape');
+  await pg.click('a[data-step=materials]');
   await pg.waitForFunction(() => !!window.__binaView, null, { timeout: 20000 });
   await choose(pg, roomId, 'იატაკი', 'SE002');
   await openAi(pg);
@@ -259,8 +295,8 @@ async function failureCase(name, setup, expect) {
   provider = setup.provider || echoSketch;
   deps = setup.deps || {};
   const pg = await newPage();
-  await pg.goto(`${URL0}#materials`);
-  await pg.waitForFunction(() => !!window.__binaView, null, { timeout: 20000 });
+  await pg.goto(`${URL0}#scene`);
+  await pg.waitForFunction(() => !!window.__binaScene?.view, null, { timeout: 20000 });
   await openAi(pg);
   await confirmAndGenerate(pg, setup.confirm || {});
   if (setup.cancelAfterMs) {
@@ -293,8 +329,8 @@ await failureCase('timeout', { provider: (b, init) => new Promise((res, rej) => 
   provider = echoSketch;
   deps = {};
   const pg = await newPage();
-  await pg.goto(`${URL0}#materials`);
-  await pg.waitForFunction(() => !!window.__binaView, null, { timeout: 20000 });
+  await pg.goto(`${URL0}#scene`);
+  await pg.waitForFunction(() => !!window.__binaScene?.view, null, { timeout: 20000 });
   await openAi(pg);
   await confirmAndGenerate(pg);
   await pg.waitForSelector('dialog.ai-dialog .ai-result img', { timeout: 20000 });

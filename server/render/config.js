@@ -39,7 +39,7 @@ const money = (v, def) => {
 const list = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
 
 export const QUALITIES = ['low', 'medium', 'high'];
-export const ASPECTS = ['landscape', 'portrait', 'square'];
+export const ASPECTS = ['16:9', '4:3', '1:1']; // the scene camera's frame
 
 export function readConfig(env = {}) {
   const provider = env.RENDER_PROVIDER === 'gemini' ? 'gemini' : 'openai';
